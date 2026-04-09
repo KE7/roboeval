@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ---------------------------------------------------------------------------
+# IMPORTANT: Simulator and VLA dependencies are NOT installed here.
+# Each simulator/VLA runs in its own isolated uv venv with a specific Python
+# version. See requirements/ directory for per-component dependency files.
+#
+# Simulators/VLAs managed separately:
+#   - LIBERO / LIBERO-Pro  → .venvs/libero/       (Python 3.8)
+#   - RoboCasa             → .venvs/robocasa/      (Python 3.11)
+#   - RoboTwin 2.0         → .venvs/robotwin/      (Python 3.10)
+#   - VLA service (Pi0.5)  → .venvs/vla/           (Python 3.11)
+#   - LiteLLM proxy        → .venvs/litellm/       (Python 3.11)
+# ---------------------------------------------------------------------------
+
+[project]
+name = "robo-eval"
+version = "0.1.0"
+description = "Unified CLI for Vision-Language-Action model evaluation on robotics benchmarks."
+license = { text = "MIT" }
+requires-python = ">=3.10"
+
+dependencies = [
+    "numpy",
+    "openai",
+    "pillow",
+    "opencv-python",
+    "tqdm",
+    "pydantic",
+    "typer",
+    "requests",
+    "httpx",
+    "fastapi",
+    "uvicorn[standard]",
+    "litellm",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "black",
+]
+
+# ---------------------------------------------------------------------------
+# Console scripts
+# ---------------------------------------------------------------------------
+
+[project.scripts]
+robo-eval = "robo_eval.cli:main"
+
+# ---------------------------------------------------------------------------
+# Other entry points (not registered — run via their specific venvs):
+#
+#   run_sim_eval.py  — robo-eval sim eval
+#   run.py           — physical-robot CLI
+#   scripts/run_openvla_native_eval.py — native OpenVLA eval
+# ---------------------------------------------------------------------------
+
+[tool.setuptools.packages.find]
+where = ["."]

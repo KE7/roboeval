@@ -1,0 +1,142 @@
+# ============================================
+# robo-eval .gitignore
+# ============================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+MANIFEST
+
+# --- Virtual environments ---
+.venvs/
+.venv/
+venv/
+env/
+
+# --- Testing ---
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# --- IDE / Editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.ruff_cache/
+.mypy_cache/
+
+# --- Legacy shell scripts in repo root ---
+/*.sh
+
+# --- Legacy scripts ---
+scripts/legacy/
+scripts/README.md
+
+# --- Internal / development docs ---
+# Keep only: adding_a_vla.md, adding_a_benchmark.md,
+#             benchmark_results.md, vla_policy_architecture.md
+docs/competitive_analysis.md
+docs/review_*
+docs/audit_*
+docs/*paper_findings*
+docs/*paper_results*
+docs/pi05_paper_libero_results.md
+docs/published_paper_results.md
+docs/smolvla_paper_findings.md
+docs/openvla_paper_findings.md
+docs/isaac_*
+docs/ik_*
+docs/blog_post.md
+docs/omar_blog_post.md
+docs/robo_eval.md
+docs/ARCHITECTURE.md
+docs/EXTENDING.md
+docs/fm_proxy_verification.md
+docs/eval_speedup_research.md
+docs/gepa_*.md
+docs/vla_proxy_design.md
+docs/p1_anomaly_report.md
+docs/benchmark_audit_report.md
+docs/libero_pro_audit_report.md
+
+# --- Results / experiment data ---
+results/
+outputs/
+libero_spatial*/
+sim_experience/
+demo_videos/
+liten_context/
+liten_examples/
+planner_context/
+
+# --- Log files ---
+*.log
+MUJOCO_LOG.TXT
+
+# --- Config files (internal) ---
+litellm_*.yaml
+
+# --- Notification scripts ---
+notify_*.sh
+
+# --- Temp artifacts ---
+echo
+EXIT:*
+Exit:*
+
+# --- Internal architecture docs ---
+sims/vla_policies/ARCHITECTURE.md
+
+# --- Lock files ---
+# uv.lock is a local resolver lockfile for uv; users may install via pip,
+# so we don't commit it.
+uv.lock
+
+# --- Binary artifacts ---
+*.whl
+
+# --- Internal reports / dev artifacts ---
+GRIPPER_*.md
+GRIPPER_*.txt
+GROOT_*.md
+INTERNVLA_*.md
+TASK_COMPLETION_REPORT.txt
+bench_output.log
+monitor_actions.py
+wait_test.sh
+MUJOCO_LOG.TXT
+
+# --- Vendored external repos ---
+InternVLA-A1/
+
+# --- Internal design docs ---
+docs/docker_migration_plan.md
+docs/action_space_plan.md
+docs/liten_vla_eval_adapter_design.md
+docs/lerobot_known_issues.md
+
+# --- Other ---
+.claude/
+images/
+requirements/
+utils/
+backup_data/
+bridge_data/
+generated_programs/
+manual_evaldata/
+finetune_data/
+robo-eval
+*.egg-info/

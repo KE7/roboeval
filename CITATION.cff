@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+title: robo-eval
+message: >-
+  If you use this software, please cite it using the metadata from this file.
+type: software
+authors:
+  - family-names: Elmaaroufi
+    given-names: Karim
+    email: elmaaroufi@berkeley.edu
+  - name: OMAR
+  - family-names: Zaharia
+    given-names: Matei
+  - family-names: Seshia
+    given-names: Sanjit A.
+repository-code: https://github.com/KE7/robo-eval
+license: MIT
+version: 0.1.0
+date-released: 2026-03-15

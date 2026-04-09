@@ -1,0 +1,9 @@
+### Current Task
+
+The current scene's initial image is given as the final image, indicated by `[INITIAL_ENVIRONMENT_IMAGE]`.
+Task instruction: {task_instruction}
+The list of initial_manipulable_objects in this scene is provided as follows: {initial_manipulable_objects}
+
+{sp_instruction_addendum}
+
+Generate a program that captures this task instruction. The format of your output should be purely executable python code that can be correctly executed with a call to exec(). There should be no other artifacts in your output.
