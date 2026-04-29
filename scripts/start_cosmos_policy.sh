@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Start the Cosmos-Policy VLA server.
+# DEPRECATED: cosmos was dropped from the harness in 0056f01.
+# Start the legacy Cosmos-Policy VLA server.
 # Env vars: COSMOS_MODEL_ID, VLA_PORT are forwarded automatically.
 #
 # Usage:

@@ -3,18 +3,18 @@
 run_openvla_native_eval.py
 
 Native OpenVLA evaluation on LIBERO benchmark suites.
-Loads the model directly (no planner, no server overhead) and runs
-the standard LIBERO eval loop: init states, warmup, image flip, action unnorm.
+Loads the model directly and runs the standard LIBERO evaluation loop:
+init states, warmup, image flip, and action unnormalization.
 
 Usage:
     MUJOCO_GL=egl TRANSFORMERS_OFFLINE=1 HF_HUB_OFFLINE=1 \\
-        .venvs/openvla_native/bin/python scripts/run_openvla_native_eval.py \\
+        python scripts/run_openvla_native_eval.py \\
         --suite libero_spatial --n-episodes 20 \\
         --out-dir results/openvla_native
 
 Supported suites:
-    libero_spatial  -> openvla/openvla-7b-finetuned-libero-spatial  (cached)
-    libero_10       -> openvla/openvla-7b-finetuned-libero-10        (cached)
+    libero_spatial  -> openvla/openvla-7b-finetuned-libero-spatial
+    libero_10       -> openvla/openvla-7b-finetuned-libero-10
 
 Per-suite max steps:
     libero_spatial: 280
@@ -39,7 +39,7 @@ from PIL import Image
 from tqdm import tqdm
 
 # ---------------------------------------------------------------------------
-# Offline mode — models are already cached
+# Offline model loading
 # ---------------------------------------------------------------------------
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -73,7 +73,7 @@ log = logging.getLogger(__name__)
 SUITE_MODEL = {
     "libero_spatial": "openvla/openvla-7b-finetuned-libero-spatial",
     "libero_10":      "openvla/openvla-7b-finetuned-libero-10",
-    # libero_object / libero_goal not cached — skip unless model added
+    # Add model IDs here to enable additional suites.
 }
 
 SUITE_MAX_STEPS = {
@@ -87,7 +87,7 @@ NUM_WARMUP_STEPS = 10   # no-op steps after reset
 
 
 # ---------------------------------------------------------------------------
-# Action processing (follows openvla-oft robot_utils.py exactly)
+# Action processing
 # ---------------------------------------------------------------------------
 
 def process_action(action: np.ndarray) -> np.ndarray:
@@ -97,8 +97,7 @@ def process_action(action: np.ndarray) -> np.ndarray:
     Gripper convention: OpenVLA uses RLDS (1=close, -1=open);
     LIBERO uses opposite (-1=close, 1=open).
 
-    This matches the canonical gripper handling in sims/vla_policies/openvla_policy.py
-    and docs/vla_policy_architecture.md line 648.
+    This matches the gripper convention used by the OpenVLA policy wrapper.
     """
     a = action.copy()
     # Binarize gripper based on sign, then invert to match LIBERO convention

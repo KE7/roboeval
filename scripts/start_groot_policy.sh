@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
-# Thin wrapper — all logic lives in robo_eval/cli.py.
+# Start the GR00T VLA server.
 # Env vars GROOT_MODEL_ID, VLA_PORT are forwarded automatically.
 exec robo-eval servers start groot "$@"

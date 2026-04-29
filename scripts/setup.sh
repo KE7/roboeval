@@ -29,6 +29,9 @@
 #
 # Environment variables:
 #   ROBOEVAL_VENDORS_DIR   Where to clone non-PyPI repos (default: ~/.local/share/roboeval/vendors)
+#   ROBOEVAL_SAPIEN_WHL    Local SAPIEN wheel override for RoboTwin
+#   ROBOEVAL_SAPIEN_AARCH64_URL
+#                           SAPIEN aarch64 wheel URL for RoboTwin
 #   LIBERO_PRO_DIR          Override LIBERO-PRO clone path
 #   SKIP_SYSTEM_DEPS        Set to 1 to skip apt-get installs
 #   DRY_RUN                 Set to 1 to print the plan without executing
@@ -41,6 +44,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENVS_DIR="$PROJECT_ROOT/.venvs"
 VENDORS_DIR="${ROBOEVAL_VENDORS_DIR:-$HOME/.local/share/roboeval/vendors}"
 INSTALL_DOCS="$PROJECT_ROOT/docs/install.md"
+ROBOEVAL_SAPIEN_AARCH64_URL="${ROBOEVAL_SAPIEN_AARCH64_URL:-https://github.com/haosulab/SAPIEN/releases/download/3.0.3/sapien-3.0.3-cp310-cp310-linux_aarch64.whl}"
+ROBOEVAL_SAPIEN_AARCH64_SHA256="${ROBOEVAL_SAPIEN_AARCH64_SHA256:-9df50de3c2e018695313a41ba470b67b0a8f1c98b489e983672a011561d70598}"
 
 SKIP_SYSTEM_DEPS="${SKIP_SYSTEM_DEPS:-0}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -458,6 +463,51 @@ validate_import() {
         log_warn "     This may be expected for packages not yet downloaded (e.g. GR00T, Cosmos)."
         log_warn "     See docs/install.md for post-install steps."
     fi
+}
+
+download_file() {
+    # download_file <url> <dest>
+    local url="$1"
+    local dest="$2"
+    mkdir -p "$(dirname "$dest")"
+    "$(venv_python robotwin)" - "$url" "$dest" <<'PY'
+import pathlib
+import sys
+from urllib.request import Request, urlopen
+
+url, dest = sys.argv[1], pathlib.Path(sys.argv[2])
+tmp = dest.with_suffix(dest.suffix + ".tmp")
+req = Request(url, headers={"User-Agent": "roboeval-setup"})
+with urlopen(req, timeout=120) as resp, tmp.open("wb") as f:
+    while True:
+        chunk = resp.read(1024 * 1024)
+        if not chunk:
+            break
+        f.write(chunk)
+tmp.replace(dest)
+PY
+}
+
+repair_sapien_librt_if_needed() {
+    # SAPIEN 3.0.3's aarch64 wheel bundles an auditwheel-repaired librt that
+    # can reference GLIBC_PRIVATE symbols on Ubuntu 22.04/aarch64.  Replacing it
+    # with the system librt matches SAPIEN's own Docker install guidance.
+    local name="$1"
+    [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "aarch64" ]] || return 0
+
+    local site_packages
+    site_packages="$("$VENVS_DIR/$name/bin/python" - <<'PY'
+import site
+print(site.getsitepackages()[0])
+PY
+)"
+    local sapien_libs
+    sapien_libs="$(find "$site_packages" -maxdepth 2 -type d -name sapien.libs | head -1)"
+    [[ -n "$sapien_libs" && -e "$sapien_libs/librt-2-4cc790af.28.so" ]] || return 0
+
+    log_step "Repairing SAPIEN bundled librt for Linux/aarch64..."
+    rm -f "$sapien_libs/librt-2-4cc790af.28.so"
+    ln -s /lib/aarch64-linux-gnu/librt.so.1 "$sapien_libs/librt-2-4cc790af.28.so"
 }
 
 # ---------------------------------------------------------------------------
@@ -1498,40 +1548,44 @@ setup_robotwin() {
         "h5py>=3.8" \
         "gymnasium>=0.29"
 
-    # SAPIEN from nightly index (not on PyPI)
-    # On aarch64, the nightly index has no aarch64 wheels; fall back to a
-    # locally built wheel if available.  Set ROBOEVAL_SAPIEN_WHL to the
-    # path of a local .whl file to force that wheel on any architecture.
-    log_step "Installing SAPIEN nightly into .venvs/robotwin..."
+    # SAPIEN:
+    #   - x86_64 and other supported platforms use the normal online package path.
+    #   - Linux/aarch64 + cp310 is not reliably resolvable through PyPI/nightly
+    #     indexes, so use SAPIEN's official GitHub release wheel URL.
+    #   - ROBOEVAL_SAPIEN_WHL remains a local override for offline or custom builds.
+    log_step "Installing SAPIEN into .venvs/robotwin..."
     local _SAPIEN_OK=0
-    if uv_pip robotwin sapien --pre \
-            --extra-index-url "https://storage.googleapis.com/sapien-nightly/" 2>/dev/null; then
-        _SAPIEN_OK=1
-    fi
-    if [[ "$_SAPIEN_OK" -eq 0 ]]; then
-        # Try local wheel: prefer ROBOEVAL_SAPIEN_WHL env var, then scan the
-        # local vendor cache for an aarch64 build.
-        local _sapien_whl="${ROBOEVAL_SAPIEN_WHL:-}"
-        if [[ -z "$_sapien_whl" ]]; then
-            # Scan known cache locations for an aarch64 sapien wheel
-            for _candidate in \
-                "$VENDORS_DIR/sapien-"*"-cp310-cp310-linux_aarch64.whl"
-            do
-                if [[ -f "$_candidate" ]]; then
-                    _sapien_whl="$_candidate"
-                    break
-                fi
-            done
+    local _sapien_whl="${ROBOEVAL_SAPIEN_WHL:-}"
+    if [[ -n "$_sapien_whl" ]]; then
+        log_step "Installing SAPIEN from ROBOEVAL_SAPIEN_WHL=$_sapien_whl"
+        uv_pip robotwin "numpy>=1.24,<2" "opencv-python<4.13" \
+            "requests>=2.22" "transforms3d>=0.3" "lxml" "networkx" "pyperclip" "setuptools"
+        uv_pip robotwin --no-deps "$_sapien_whl" && _SAPIEN_OK=1 || true
+        repair_sapien_librt_if_needed robotwin
+    elif [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "aarch64" ]]; then
+        _sapien_whl="$VENDORS_DIR/$(basename "$ROBOEVAL_SAPIEN_AARCH64_URL")"
+        if [[ ! -f "$_sapien_whl" ]] || ! echo "$ROBOEVAL_SAPIEN_AARCH64_SHA256  $_sapien_whl" | sha256sum -c - >/dev/null 2>&1; then
+            log_step "Caching SAPIEN Linux/aarch64 wheel at $_sapien_whl"
+            rm -f "$_sapien_whl"
+            download_file "$ROBOEVAL_SAPIEN_AARCH64_URL" "$_sapien_whl"
+            echo "$ROBOEVAL_SAPIEN_AARCH64_SHA256  $_sapien_whl" | sha256sum -c -
+        else
+            log_info "Using cached SAPIEN Linux/aarch64 wheel: $_sapien_whl"
         fi
-        if [[ -n "$_sapien_whl" && -f "$_sapien_whl" ]]; then
-            log_step "Installing SAPIEN from local wheel: $_sapien_whl"
-            uv_pip robotwin "$_sapien_whl" && _SAPIEN_OK=1 || true
+        uv_pip robotwin "numpy>=1.24,<2" "opencv-python<4.13" \
+            "requests>=2.22" "transforms3d>=0.3" "lxml" "networkx" "pyperclip" "setuptools"
+        uv_pip robotwin --no-deps "$_sapien_whl" && _SAPIEN_OK=1 || true
+        repair_sapien_librt_if_needed robotwin
+    else
+        if uv_pip robotwin sapien --pre \
+                --extra-index-url "https://storage.googleapis.com/sapien-nightly/" 2>/dev/null; then
+            _SAPIEN_OK=1
         fi
     fi
     if [[ "$_SAPIEN_OK" -eq 0 ]]; then
         log_warn "SAPIEN install failed — RoboTwin sim worker will not start."
-        log_warn "  On aarch64 set ROBOEVAL_SAPIEN_WHL=/path/to/sapien*.whl and re-run."
-        log_warn "  On x86_64: .venvs/robotwin/bin/pip install sapien --pre --extra-index-url https://storage.googleapis.com/sapien-nightly/"
+        log_warn "  Override with ROBOEVAL_SAPIEN_WHL=/path/to/sapien*.whl or"
+        log_warn "  ROBOEVAL_SAPIEN_AARCH64_URL=https://.../sapien-...linux_aarch64.whl"
     fi
 
     # ----- curobo + mplib: motion planning libs (full RoboTwin functionality) -----

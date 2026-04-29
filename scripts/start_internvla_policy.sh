@@ -4,9 +4,6 @@
 #
 # Usage:
 #   bash scripts/start_internvla_policy.sh [--port 5104]
-#
-# Or directly:
-#   MUJOCO_GL=egl .venvs/internvla/bin/python -m sims.vla_policies.internvla_policy --port 5104
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
