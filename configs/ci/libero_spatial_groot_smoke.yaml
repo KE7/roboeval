@@ -1,0 +1,35 @@
+# CI smoke config: GR00T × libero_spatial
+#
+# Gate: ≥1/10 episodes succeed (smoke, not benchmark).
+# Checkpoint: nvidia/GR00T-N1.7-LIBERO (libero_sim embodiment tag).
+# Mode: no-vlm, direct instruction, delta-actions (7-dim EEF delta).
+# Expected runtime: hardware-dependent; GR00T chunk replay can be slow.
+#
+# Requires (started by CI before robo-eval run):
+#   VLA server : GROOT_MODEL_ID=nvidia/GR00T-N1.7-LIBERO \
+#                GROOT_EMBODIMENT_TAG=libero_sim \
+#                GROOT_MODEL_SUBFOLDER=libero_spatial \
+#                  python -m sims.vla_policies.groot_policy --port 5108
+#   Sim worker : python -m sims.sim_worker --sim libero --port 5300 --headless
+
+name: ci_groot_libero_spatial_smoke
+
+vla: groot
+vla_url: http://localhost:5108
+
+sim: libero
+sim_url: http://localhost:5300
+suite: libero_spatial
+
+# Smoke gate: 10 episodes on 1 task.
+episodes_per_task: 10
+max_tasks: 1
+
+no_vlm: true
+delta_actions: true
+
+eval_python: ""
+
+output_dir: results/ci
+
+params: {}

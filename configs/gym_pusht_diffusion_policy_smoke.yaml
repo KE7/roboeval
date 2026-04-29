@@ -1,0 +1,46 @@
+# robo-eval smoke config: Diffusion Policy × gym-pusht (PushT task)
+# Usage: robo-eval run --config configs/gym_pusht_diffusion_policy_smoke.yaml
+# Requires:
+#   VLA server : .venvs/diffusion_policy/bin/python \
+#                  -m sims.vla_policies.diffusion_policy_policy --port 5103
+#   Sim worker : .venvs/gym_pusht/bin/python sims/sim_worker.py \
+#                  --sim gym_pusht --port 5305 --headless
+#
+# gym-pusht is the canonical companion simulator for Diffusion Policy.
+# The original DP paper (Chi et al., 2023) was trained and evaluated on PushT.
+# A T-shaped block must be pushed into a target zone using a 2-dim (x,y)
+# end-effector action. Pure Python / PyPI; no MuJoCo or conda required.
+#
+# Expected smoke outcome: non-trivial success rate (>0%), typically 30-80%
+# with lerobot/diffusion_pusht on a single episode.
+
+name: gym_pusht_diffusion_policy_smoke
+
+# VLA server: Diffusion Policy (canonical DP, DDPM backbone)
+vla: diffusion_policy
+vla_url: http://localhost:5103
+
+# Sim: gym-pusht (PushT pushing benchmark)
+sim: gym_pusht
+sim_url: http://localhost:5305
+suite: ""              # gym-pusht has no suite; task is the gymnasium id
+task: gym_pusht/PushT-v0
+
+# Episodes
+episodes_per_task: 10
+max_tasks: 1
+
+# Action: gym-pusht consumes ABSOLUTE 2-dim (x,y) end-effector targets, NOT delta.
+delta_actions: false
+
+# VLM
+no_vlm: true
+
+# Python for subprocess (defaults to sys.executable if empty)
+eval_python: ""
+
+# Output
+output_dir: results/gym_pusht_dp_smoke
+
+# Extra params passed to run_sim_eval.py (key -> value)
+params: {}

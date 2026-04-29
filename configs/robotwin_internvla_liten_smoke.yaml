@@ -1,0 +1,48 @@
+# robo-eval smoke config: InternVLA x RoboTwin with VLM planning
+#
+# Usage: robo-eval run --config configs/robotwin_internvla_liten_smoke.yaml
+#
+# Requires:
+#   VLA server : .venvs/internvla/bin/python -m sims.vla_policies.internvla_policy --port 5105
+#   Sim worker : unset DISPLAY && .venvs/robotwin/bin/python sims/sim_worker.py \
+#                  --sim robotwin --port 5302 --headless
+#   DISPLAY should be unset for headless EGL rendering.
+#
+# RoboTwin uses 14-dim absolute joint_pos actions for InternVLA.
+
+name: robotwin_internvla_smoke_liten
+
+# VLA server
+vla: internvla
+vla_url: http://localhost:5105
+
+# Sim
+sim: robotwin
+sim_url: http://localhost:5302
+suite: robotwin
+# RoboTwin resolves integer indices against alphabetical envs/<task>.py listing.
+# Task "0" resolves to the first env alphabetically (block_hammer_beat).
+task: "0"
+
+# Episodes
+episodes_per_task: 10
+max_tasks: 1
+
+# RoboTwin consumes ABSOLUTE 14-dim joint targets, NOT delta EEF.
+delta_actions: false
+
+# VLM
+
+# Python for subprocess (defaults to sys.executable if empty)
+# VLM planner endpoint
+no_vlm: false
+vlm_model: Qwen/Qwen3.6-27B-FP8
+vlm_endpoint: localhost:8000
+
+eval_python: ""
+
+# Output
+output_dir: results/robotwin_internvla_smoke
+
+# Extra params passed to run_sim_eval.py (key -> value)
+params: {}

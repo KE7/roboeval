@@ -1,0 +1,37 @@
+# robo-eval smoke config: smolvla x libero_object (10 episodes, 1 task)
+# Usage: robo-eval run --config configs/libero_object_smolvla_liten_smoke.yaml
+# Requires:
+#   VLA server: .venvs/smolvla/bin/python -m sims.vla_policies.smolvla_policy --port 5102
+#   Sim worker: .venvs/libero/bin/python -m sims.sim_worker --backend libero --port 5300 --headless
+
+name: libero_object_smolvla_liten
+
+# VLA server (smolvla default port is 5102 per config)
+vla: smolvla
+vla_url: http://localhost:5102
+
+# Sim
+sim: libero
+sim_url: http://localhost:5300
+suite: libero_object
+
+# Episodes
+episodes_per_task: 10
+max_tasks: 1
+
+# Action
+delta_actions: true
+
+# Python for subprocess (defaults to sys.executable if empty)
+# SmolVLA executes the full LIBERO object instruction directly.
+no_vlm: true
+vlm_model: Qwen/Qwen3.6-27B-FP8
+vlm_endpoint: localhost:8000
+
+eval_python: ""
+
+# Output
+output_dir: results/libero_object_smolvla
+
+# Extra params passed to run_sim_eval.py (key -> value)
+params: {}

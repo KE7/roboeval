@@ -1,0 +1,43 @@
+# robo-eval smoke config: InternVLA x RoboTwin (1 episode, 1 task)
+#
+# Usage: robo-eval run --config configs/robotwin_internvla_smoke.yaml
+#
+# Requires:
+#   VLA server : .venvs/internvla/bin/python -m sims.vla_policies.internvla_policy --port 5105
+#   Sim worker : MUJOCO_GL=egl .venvs/robotwin/bin/python sims/sim_worker.py \
+#                  --sim robotwin --port 5302 --headless
+#
+# RoboTwin uses 14-dim absolute joint_pos actions for InternVLA.
+
+name: robotwin_internvla_smoke
+
+# VLA server
+vla: internvla
+vla_url: http://localhost:5105
+
+# Sim
+sim: robotwin
+sim_url: http://localhost:5302
+suite: robotwin
+# RoboTwin resolves integer indices against alphabetical envs/<task>.py listing.
+# Task "0" resolves to the first env alphabetically (block_hammer_beat).
+task: "0"
+
+# Episodes
+episodes_per_task: 1
+max_tasks: 1
+
+# RoboTwin consumes ABSOLUTE 14-dim joint targets, NOT delta EEF.
+delta_actions: false
+
+# VLM
+no_vlm: true
+
+# Python for subprocess (defaults to sys.executable if empty)
+eval_python: ""
+
+# Output
+output_dir: results/robotwin_internvla_smoke
+
+# Extra params passed to run_sim_eval.py (key -> value)
+params: {}

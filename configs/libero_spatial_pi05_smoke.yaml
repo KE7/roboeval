@@ -1,0 +1,35 @@
+# robo-eval smoke config: pi05 x libero_spatial (10 episodes per task, 1 task)
+# Usage: robo-eval run --config configs/libero_spatial_pi05_smoke.yaml
+# Requires:
+#   VLA server: .venvs/vla/bin/python -m sims.vla_policies.pi05_policy --port 5100
+#   Sim worker: .venvs/libero/bin/python -m sims.sim_worker --backend libero --port 5300 --headless
+
+name: libero_spatial_pi05_smoke
+
+# VLA server
+vla: pi05
+vla_url: http://localhost:5100
+
+# Sim
+sim: libero
+sim_url: http://localhost:5300
+suite: libero_spatial
+
+# Episodes
+episodes_per_task: 10
+max_tasks: 1
+
+# VLM
+no_vlm: true
+
+# Action
+delta_actions: true
+
+# Python for subprocess (defaults to sys.executable if empty)
+eval_python: ""
+
+# Output
+output_dir: results/migration_20260424_232852/phase4
+
+# Extra params passed to run_sim_eval.py (key -> value)
+params: {}

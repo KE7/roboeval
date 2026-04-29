@@ -1,0 +1,66 @@
+# robo-eval smoke config: TDMPC2 × Meta-World button-press-v2 (1 episode)
+#
+# Usage:
+#   robo-eval run --config configs/metaworld_tdmpc2_smoke.yaml
+#
+# Requires:
+#   VLA server (TDMPC2, 4-dim Sawyer eef-delta):
+#     .venvs/tdmpc2/bin/python -m sims.vla_policies.tdmpc2_policy --port 5109
+#
+#   Sim worker (Meta-World, 4-dim eef-delta):
+#     MUJOCO_GL=egl \
+#     .venvs/metaworld/bin/python sims/sim_worker.py \
+#       --sim metaworld --port 5305 --headless
+#
+# ──────────────────────────────────────────────────────────────────────────
+# ACTION-DIM EXACT MATCH (UNBLOCKS METAWORLD)
+# ──────────────────────────────────────────────────────────────────────────
+# TDMPC2 (MT80 metaworld checkpoint) emits 4-dim Sawyer eef-delta actions:
+#   [dx, dy, dz, gripper]   (range ~[-1, 1])
+#
+# Meta-World expects 4-dim actions:
+#   [dx, dy, dz, gripper]
+#
+# Spec gate: VLA action_spec.eef_delta.format == "eef_delta_xyz_gripper"
+#            sim action_spec.eef_delta.format == "eef_delta_xyz_gripper"
+#            VLA dim == 4 == sim accepted_dims.
+#
+# This config provides a 4-dim-native Meta-World smoke test.
+# ──────────────────────────────────────────────────────────────────────────
+
+name: metaworld_tdmpc2_smoke
+
+# VLA server — TDMPC2 (model-based RL; 4-dim Sawyer eef-delta)
+vla: tdmpc2
+vla_url: http://localhost:5109
+
+# Sim
+sim: metaworld
+sim_url: http://localhost:5305
+# suite is unused for metaworld (task name is passed directly)
+suite: ""
+
+# Task
+# button-press-v2 is the canonical TDMPC2 metaworld smoke task.
+# Other valid MT50 candidates: pick-place-v2, reach-v2, drawer-open-v2.
+task: button-press-v2
+
+# Episodes
+episodes_per_task: 10
+max_tasks: 1
+
+# VLM
+no_vlm: true
+
+# Action
+# delta_actions=true because Meta-World uses EEF position delta.
+delta_actions: true
+
+# Python for subprocess
+eval_python: ""
+
+# Output
+output_dir: results/metaworld_tdmpc2_smoke
+
+# Extra params
+params: {}

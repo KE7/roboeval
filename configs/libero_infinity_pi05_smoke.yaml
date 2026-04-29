@@ -1,0 +1,35 @@
+# robo-eval smoke config: Pi 0.5 x LIBERO-Infinity (10 episodes, 1 task)
+#
+# Usage: robo-eval run --config configs/libero_infinity_pi05_smoke.yaml
+#
+# Requires:
+#   VLA server : .venvs/pi05/bin/python -m sims.vla_policies.pi05_policy --port 5100
+#   Sim worker : MUJOCO_GL=egl .venvs/libero_infinity/bin/python sims/sim_worker.py \
+#                  --sim libero_infinity --port 5308 --headless
+#
+# LIBERO-Infinity suites are named libero_infinity_<base> and reuse LIBERO's
+# 7-dim pd_ee_delta_pose action contract.
+
+name: libero_infinity_pi05_smoke
+
+vla: pi05
+vla_url: http://localhost:5100
+
+sim: libero_infinity
+sim_url: http://localhost:5308
+suite: libero_infinity_spatial
+# LIBERO-Infinity tasks are resolved by name within the libero_infinity_spatial suite.
+task: ""
+
+episodes_per_task: 10
+max_tasks: 1
+
+delta_actions: true
+
+no_vlm: true
+
+eval_python: ""
+
+output_dir: results/libero_infinity_pi05_smoke
+
+params: {}

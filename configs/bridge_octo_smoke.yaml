@@ -1,0 +1,56 @@
+# robo-eval smoke config: octo-small-1.5 x libero_spatial (infra validation only)
+#
+# aarch64-blocked: Octo requires x86_64 — its dep dlimp==0.0.1 transitively
+#   pins tensorflow==2.15.0 which on aarch64 resolves to tensorflow_cpu_aws (an
+#   empty stub with no tf.image module), breaking `from octo.model.octo_model
+#   import OctoModel` at import time.  This config will fail to load the policy
+#   on aarch64 systems.  Tracked for v0.1.1 if dlimp upstream relaxes its TF pin.
+#
+# IMPORTANT — PARTIAL INTEGRATION NOTE:
+#   Octo-small-1.5 is trained on the Open-X-Embodiment (OXE) mixture (Bridge V2,
+#   RT-1, Language-Table, …).  v0.1 simulator tasks do not use Bridge data, so this is
+#   a zero-shot cross-domain pairing.  This config exists purely for infrastructure
+#   smoke testing (server health, ActionObsSpec gate, action format correctness).
+#   Do NOT interpret success-rate numbers from this config — they are not meaningful.
+#   Full accuracy evaluation is deferred to v0.2 when a Bridge-compatible or OXE-
+#   compatible simulator backend is added.
+#
+# Usage:
+#   VLA server: OCTO_MODEL_ID=rail-berkeley/octo-small-1.5 \
+#               .venvs/octo/bin/python -m sims.vla_policies.octo_policy --port 5106
+#   Sim worker: MUJOCO_GL=egl \
+#               .venvs/libero/bin/python -m sims.sim_worker --sim libero --port 5300 --headless
+#   Run:        robo-eval run --config configs/bridge_octo_smoke.yaml
+#
+# Prerequisite: octo package installed in .venvs/octo
+#   .venvs/octo/bin/pip install git+https://github.com/octo-models/octo
+
+name: bridge_octo_smoke
+
+# VLA server
+vla: octo
+vla_url: http://localhost:5106
+
+# Sim
+sim: libero
+sim_url: http://localhost:5300
+suite: libero_spatial
+
+# Episodes — minimal, this is an infra smoke not an accuracy run
+episodes_per_task: 2
+max_tasks: 1
+
+# VLM — disabled; Octo takes raw language instructions directly
+no_vlm: true
+
+# Action
+delta_actions: true
+
+# Python for subprocess (defaults to sys.executable if empty)
+eval_python: ""
+
+# Output
+output_dir: results/octo_smoke
+
+# Extra params
+params: {}

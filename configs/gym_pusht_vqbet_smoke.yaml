@@ -1,0 +1,45 @@
+# robo-eval smoke config: VQ-BeT × gym-pusht (PushT task)
+# Usage: robo-eval run --config configs/gym_pusht_vqbet_smoke.yaml
+# Requires:
+#   VLA server : .venvs/vqbet/bin/python \
+#                  -m sims.vla_policies.vqbet_policy --port 5108
+#   Sim worker : .venvs/gym_pusht/bin/python sims/sim_worker.py \
+#                  --sim gym_pusht --port 5305 --headless
+#
+# gym-pusht is the canonical companion simulator for VQ-BeT. The original
+# BeT paper used PushT as its primary evaluation, the same benchmark
+# Diffusion Policy targets. This config compares two action-generation
+# architectures under identical observations and action space:
+#   VQ-BeT          : VQ-VAE-quantized action codes + transformer
+#   Diffusion Policy: continuous DDPM denoising
+
+name: gym_pusht_vqbet_smoke
+
+# VLA server: VQ-BeT (vector-quantized actions + transformer)
+vla: vqbet
+vla_url: http://localhost:5108
+
+# Sim: gym-pusht (PushT pushing benchmark)
+sim: gym_pusht
+sim_url: http://localhost:5305
+suite: ""              # gym-pusht has no suite; task is the gymnasium id
+task: gym_pusht/PushT-v0
+
+# Episodes
+episodes_per_task: 10
+max_tasks: 1
+
+# Action: gym-pusht consumes ABSOLUTE 2-dim (x,y) end-effector targets, NOT delta.
+delta_actions: false
+
+# VLM
+no_vlm: true
+
+# Python for subprocess (defaults to sys.executable if empty)
+eval_python: ""
+
+# Output
+output_dir: results/gym_pusht_vqbet_smoke
+
+# Extra params passed to run_sim_eval.py (key -> value)
+params: {}

@@ -34,30 +34,32 @@ Canonical pairings
 Both checkpoints use the publicly accessible ``nvidia/Eagle-Block2A-2B-v2``
 backbone shipped inside the Isaac-GR00T clone — no license-gated downloads.
 """
+
 from __future__ import annotations
 
 import argparse
 import base64
 import logging
 import os
+import sys
 import tempfile
 from io import BytesIO
 from pathlib import Path
 
 import numpy as np
+
 from sims.vla_policies.base import VLAPolicyBase, make_app
 from sims.vla_policies.vla_schema import VLAObservation
 
 try:
-    from robo_eval.specs import (
-        ActionObsSpec,
-        POSITION_DELTA,
-        ROTATION_AA,
-        GRIPPER_CLOSE_NEG,
+    from roboeval.specs import (
         GRIPPER_CLOSE_POS,
         IMAGE_RGB,
         LANGUAGE,
+        POSITION_DELTA,
+        ActionObsSpec,
     )
+
     _SPECS_AVAILABLE = True
 except ImportError:
     _SPECS_AVAILABLE = False
@@ -71,17 +73,44 @@ def _ensure_writable_hf_modules_cache() -> None:
     if os.environ.get("HF_MODULES_CACHE"):
         return
 
-    cache_root = (
-        Path(tempfile.gettempdir())
-        / "roboeval-hf-modules"
-        / str(os.getuid())
-        / "groot"
-    )
+    cache_root = Path(tempfile.gettempdir()) / "roboeval-hf-modules" / str(os.getuid()) / "groot"
     cache_root.mkdir(parents=True, exist_ok=True)
     os.environ["HF_MODULES_CACHE"] = str(cache_root)
 
 
 _ensure_writable_hf_modules_cache()
+
+
+def _force_hf_offline_for_cached_model(model_id: str) -> None:
+    """Force HF offline mode when the requested GR00T model is already cached."""
+    if os.environ.get("GROOT_FORCE_ONLINE") == "1":
+        return
+
+    import huggingface_hub
+    import huggingface_hub.constants
+
+    cached_config = huggingface_hub.try_to_load_from_cache(model_id, "config.json")
+    if cached_config is None or cached_config is huggingface_hub._CACHED_NO_EXIST:
+        return
+
+    missing_offline_flag = not (
+        os.environ.get("HF_HUB_OFFLINE") and os.environ.get("TRANSFORMERS_OFFLINE")
+    )
+    if not missing_offline_flag:
+        return
+
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    huggingface_hub.constants.HF_HUB_OFFLINE = True
+    transformers_hub = sys.modules.get("transformers.utils.hub")
+    if transformers_hub is not None:
+        transformers_hub._is_offline_mode = True  # noqa: SLF001
+    logger.info(
+        "GR00T model %s is cached at %s; forcing HF_HUB_OFFLINE=1 and "
+        "TRANSFORMERS_OFFLINE=1. Set GROOT_FORCE_ONLINE=1 to use Hugging Face online.",
+        model_id,
+        cached_config,
+    )
 
 
 def _resolve_embodiment_tag(tag_str: str):
@@ -130,6 +159,8 @@ class GR00TPolicy(VLAPolicyBase):
         action_key_filter: str = "",
         **_,
     ) -> None:
+        _force_hf_offline_for_cached_model(model_id)
+
         from gr00t.policy.gr00t_policy import Gr00tPolicy
 
         self.model_id = model_id
@@ -139,6 +170,7 @@ class GR00TPolicy(VLAPolicyBase):
         model_path: str = model_id
         if model_subfolder:
             from huggingface_hub import snapshot_download
+
             local_dir = snapshot_download(
                 model_id,
                 allow_patterns=[f"{model_subfolder}/**"],
@@ -147,12 +179,17 @@ class GR00TPolicy(VLAPolicyBase):
             model_path = str(os.path.join(local_dir, model_subfolder))
             logger.info(
                 "GR00T subfolder resolved: repo=%s, subfolder=%s → %s",
-                model_id, model_subfolder, model_path,
+                model_id,
+                model_subfolder,
+                model_path,
             )
 
         logger.info(
             "Loading GR00T-N1.6: model=%s, embodiment=%s (%s), device=%s",
-            model_path, embodiment_tag, getattr(emb_tag, "value", emb_tag), device,
+            model_path,
+            embodiment_tag,
+            getattr(emb_tag, "value", emb_tag),
+            device,
         )
 
         self._policy = Gr00tPolicy(
@@ -163,11 +200,11 @@ class GR00TPolicy(VLAPolicyBase):
         )
 
         cfg = self._policy.get_modality_config()
-        self._video_keys       = list(cfg["video"].modality_keys)
-        self._state_keys       = list(cfg["state"].modality_keys)
-        self._action_keys      = list(cfg["action"].modality_keys)
-        self._language_key     = self._policy.language_key
-        self._embodiment_tag   = embodiment_tag
+        self._video_keys = list(cfg["video"].modality_keys)
+        self._state_keys = list(cfg["state"].modality_keys)
+        self._action_keys = list(cfg["action"].modality_keys)
+        self._language_key = self._policy.language_key
+        self._embodiment_tag = embodiment_tag
         self._embodiment_value = getattr(emb_tag, "value", str(emb_tag))
         self._action_chunk_size = len(cfg["action"].delta_indices)
 
@@ -184,9 +221,7 @@ class GR00TPolicy(VLAPolicyBase):
             filter_keys = [k.strip() for k in action_key_filter.split(",") if k.strip()]
             self._action_keys = [k for k in self._action_keys if k in filter_keys]
             self._action_dim = sum(
-                int(norm_params[k]["dim"].item())
-                for k in self._action_keys
-                if k in norm_params
+                int(norm_params[k]["dim"].item()) for k in self._action_keys if k in norm_params
             )
 
         # Store per-key state dims for flat-state → structured decomposition.
@@ -194,9 +229,7 @@ class GR00TPolicy(VLAPolicyBase):
         # RoboTwin) instead of a keyed state_dict (e.g. LIBERO / RoboCasa).
         state_norm = sap.norm_params[self._embodiment_value].get("state", {})
         self._state_key_dims: dict = {
-            k: int(state_norm[k]["dim"].item())
-            for k in self._state_keys
-            if k in state_norm
+            k: int(state_norm[k]["dim"].item()) for k in self._state_keys if k in state_norm
         }
 
         col = 0
@@ -212,26 +245,31 @@ class GR00TPolicy(VLAPolicyBase):
         self.ready = True
         logger.info(
             "GR00T ready: chunk=%d, action_dim=%d, video_keys=%s, state_keys=%s, action_keys=%s",
-            self._action_chunk_size, self._action_dim,
-            self._video_keys, self._state_keys, self._action_keys,
+            self._action_chunk_size,
+            self._action_dim,
+            self._video_keys,
+            self._state_keys,
+            self._action_keys,
         )
 
     def predict(self, obs: VLAObservation) -> list[list[float]]:
         def decode(b64: str) -> np.ndarray:
             from PIL import Image
-            return np.asarray(Image.open(BytesIO(base64.b64decode(b64))).convert("RGB"), dtype=np.uint8)
+
+            return np.asarray(
+                Image.open(BytesIO(base64.b64decode(b64))).convert("RGB"), dtype=np.uint8
+            )
 
         sources = {
-            "primary":   decode(obs.images["primary"]),
+            "primary": decode(obs.images["primary"]),
             "secondary": decode(obs.images["secondary"]) if obs.images.get("secondary") else None,
-            "wrist":     decode(obs.images["wrist"])     if obs.images.get("wrist")     else None,
+            "wrist": decode(obs.images["wrist"]) if obs.images.get("wrist") else None,
         }
 
         # Build nested observation dict (Gr00tPolicy native interface).
         video_obs: dict = {}
         for key in self._video_keys:
-            if "side_0" in key or "head" in key \
-                    or key in ("image", "image_0", "res256_image_0"):
+            if "side_0" in key or "head" in key or key in ("image", "image_0", "res256_image_0"):
                 img = sources["primary"]
             elif "side_1" in key or "secondary" in key:
                 img = sources["secondary"]
@@ -243,9 +281,7 @@ class GR00TPolicy(VLAPolicyBase):
                     raise ValueError(f"GR00T requires 'wrist' image for video key '{key}'")
             else:
                 # Fallback: map unknown keys to primary camera with a warning.
-                logger.warning(
-                    "Unknown GR00T video key '%s'; falling back to primary camera.", key
-                )
+                logger.warning("Unknown GR00T video key '%s'; falling back to primary camera.", key)
                 img = sources["primary"]
             # Gr00tPolicy expects (B=1, T=1, H, W, C) uint8.
             video_obs[key] = img[None, None]
@@ -270,7 +306,7 @@ class GR00TPolicy(VLAPolicyBase):
             for key in self._state_keys:
                 dim = key_dims.get(key, 1)
                 if offset + dim <= len(flat_arr):
-                    val = flat_arr[offset:offset + dim]
+                    val = flat_arr[offset : offset + dim]
                 else:
                     val = np.zeros(dim, dtype=np.float32)
                 state_obs[key] = val.reshape(1, 1, -1)
@@ -278,7 +314,7 @@ class GR00TPolicy(VLAPolicyBase):
         else:
             raise ValueError(
                 "GR00T requires either structured or flat proprioceptive state; "
-                "robo-eval did not provide either."
+                "roboeval did not provide either."
             )
 
         # Gr00tPolicy language schema: dict[str, list[list[str]]] with shape (B=1, T=1).
@@ -306,7 +342,10 @@ class GR00TPolicy(VLAPolicyBase):
             g = flat_action[:, self._gripper_col_idx]
             logger.info(
                 "RAW gripper '%s' pre-binarize: min=%.4f max=%.4f mean=%.4f vals=%s",
-                self._gripper_key_name, float(g.min()), float(g.max()), float(g.mean()),
+                self._gripper_key_name,
+                float(g.min()),
+                float(g.max()),
+                float(g.mean()),
                 [round(float(x), 4) for x in g[:8]],
             )
             if self._gripper_key_name == "gripper_close":
@@ -317,7 +356,8 @@ class GR00TPolicy(VLAPolicyBase):
                 flat_action[:, self._gripper_col_idx] = np.where(g < 0.5, 1.0, -1.0)
             logger.info(
                 "POST-binarize gripper: close=%d/%d",
-                int((flat_action[:, self._gripper_col_idx] > 0).sum()), len(g),
+                int((flat_action[:, self._gripper_col_idx] > 0).sum()),
+                len(g),
             )
 
         return flat_action.tolist()
@@ -341,7 +381,8 @@ class GR00TPolicy(VLAPolicyBase):
         cameras = list(dict.fromkeys(_cameras))  # deduplicate, preserve order
 
         return {
-            "name": (self.model_id.split("/")[-1] if "/" in self.model_id else self.model_id) or "groot",
+            "name": (self.model_id.split("/")[-1] if "/" in self.model_id else self.model_id)
+            or "groot",
             "model_id": self.model_id,
             "embodiment_tag": et,
             "action_space": {
@@ -358,7 +399,9 @@ class GR00TPolicy(VLAPolicyBase):
                 "image_transform": "none",
             },
             "modality_keys": {
-                "video": vk, "state": sk, "action": ak,
+                "video": vk,
+                "state": sk,
+                "action": ak,
                 "language": getattr(self, "_language_key", ""),
             },
         }
@@ -378,7 +421,7 @@ class GR00TPolicy(VLAPolicyBase):
             return True
         return False
 
-    def get_action_spec(self) -> "dict[str, ActionObsSpec] | None":
+    def get_action_spec(self) -> dict[str, ActionObsSpec] | None:
         """GR00T action spec: derived from the loaded checkpoint's action keys.
 
         Joint-position mode (future ALOHA / RoboTwin checkpoint):
@@ -407,7 +450,7 @@ class GR00TPolicy(VLAPolicyBase):
             "gripper": GRIPPER_CLOSE_POS,
         }
 
-    def get_observation_spec(self) -> "dict[str, ActionObsSpec] | None":
+    def get_observation_spec(self) -> dict[str, ActionObsSpec] | None:
         """GR00T observation spec: cameras derived from video_keys + structured state + language."""
         if not _SPECS_AVAILABLE:
             return None
@@ -415,7 +458,12 @@ class GR00TPolicy(VLAPolicyBase):
         for role in ("primary", "wrist", "secondary"):
             vk = getattr(self, "_video_keys", [])
             needs = any(
-                (role == "primary" and "wrist" not in k and "secondary" not in k and "side_1" not in k)
+                (
+                    role == "primary"
+                    and "wrist" not in k
+                    and "secondary" not in k
+                    and "side_1" not in k
+                )
                 or (role == "wrist" and "wrist" in k)
                 or (role == "secondary" and ("side_1" in k or "secondary" in k))
                 for k in vk
@@ -453,21 +501,34 @@ def main():
     import uvicorn
 
     parser = argparse.ArgumentParser(description="GR00T-N1.6 Policy Server")
-    parser.add_argument("--model-id",       default=os.environ.get("GROOT_MODEL_ID", "0xAnkitSingh/GR00T-N1.6-LIBERO"))
-    parser.add_argument("--embodiment-tag", dest="embodiment_tag",
-                        default=os.environ.get("GROOT_EMBODIMENT_TAG", "LIBERO_PANDA"))
-    parser.add_argument("--model-subfolder", dest="model_subfolder",
-                        default=os.environ.get("GROOT_MODEL_SUBFOLDER", ""),
-                        help="Optional HuggingFace repo subfolder (legacy; not needed "
-                             "for the default 0xAnkitSingh/GR00T-N1.6-LIBERO repo). "
-                             "Set via GROOT_MODEL_SUBFOLDER env var.")
-    parser.add_argument("--action-keys", dest="action_keys",
-                        default=os.environ.get("GROOT_ACTION_KEYS", ""),
-                        help="Comma-separated subset of action keys to concatenate "
-                             "(e.g. 'left_arm,right_arm' for GR1→RoboTwin 14-dim). "
-                             "Set via GROOT_ACTION_KEYS env var.")
-    parser.add_argument("--port",  type=int, default=int(os.environ.get("PORT", os.environ.get("VLA_PORT", 8000))))
-    parser.add_argument("--host",  default="0.0.0.0")
+    parser.add_argument(
+        "--model-id", default=os.environ.get("GROOT_MODEL_ID", "0xAnkitSingh/GR00T-N1.6-LIBERO")
+    )
+    parser.add_argument(
+        "--embodiment-tag",
+        dest="embodiment_tag",
+        default=os.environ.get("GROOT_EMBODIMENT_TAG", "LIBERO_PANDA"),
+    )
+    parser.add_argument(
+        "--model-subfolder",
+        dest="model_subfolder",
+        default=os.environ.get("GROOT_MODEL_SUBFOLDER", ""),
+        help="Optional HuggingFace repo subfolder (legacy; not needed "
+        "for the default 0xAnkitSingh/GR00T-N1.6-LIBERO repo). "
+        "Set via GROOT_MODEL_SUBFOLDER env var.",
+    )
+    parser.add_argument(
+        "--action-keys",
+        dest="action_keys",
+        default=os.environ.get("GROOT_ACTION_KEYS", ""),
+        help="Comma-separated subset of action keys to concatenate "
+        "(e.g. 'left_arm,right_arm' for GR1→RoboTwin 14-dim). "
+        "Set via GROOT_ACTION_KEYS env var.",
+    )
+    parser.add_argument(
+        "--port", type=int, default=int(os.environ.get("PORT", os.environ.get("VLA_PORT", 8000)))
+    )
+    parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -476,14 +537,18 @@ def main():
 
     policy = GR00TPolicy()
     app = make_app(
-        policy, args.model_id, args.device,
+        policy,
+        args.model_id,
+        args.device,
         title="GR00T-N1.6 Policy Server",
         embodiment_tag=args.embodiment_tag,
         model_subfolder=args.model_subfolder,
         action_key_filter=args.action_keys,
     )
     logging.basicConfig(level=logging.INFO)
-    print(f"[groot_policy] Starting on {args.host}:{args.port} model={args.model_id} subfolder={args.model_subfolder!r} embodiment={args.embodiment_tag} action_keys={args.action_keys!r}")
+    print(
+        f"[groot_policy] Starting on {args.host}:{args.port} model={args.model_id} subfolder={args.model_subfolder!r} embodiment={args.embodiment_tag} action_keys={args.action_keys!r}"
+    )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

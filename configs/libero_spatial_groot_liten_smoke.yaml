@@ -1,0 +1,44 @@
+# robo-eval smoke config: GR00T-N1.6 × libero_spatial (hierarchical planner, 1 episode, 1 task)
+#
+# Usage: robo-eval run --config configs/libero_spatial_groot_liten_smoke.yaml
+#
+# Requires:
+#   VLA server : GROOT_MODEL_ID=0xAnkitSingh/GR00T-N1.6-LIBERO \
+#                GROOT_EMBODIMENT_TAG=LIBERO_PANDA \
+#                  .venvs/groot/bin/python -m sims.vla_policies.groot_policy --port 5108
+#   Sim worker : MUJOCO_GL=egl .venvs/libero/bin/python -m sims.sim_worker \
+#                  --sim libero --port 5300 --headless
+#
+# Uses the community LIBERO fine-tune of GR00T-N1.6
+# (`0xAnkitSingh/GR00T-N1.6-LIBERO`) under the Isaac-GR00T N1.6 codebase. Action space:
+# 7-dim EEF delta (x, y, z, roll, pitch, yaw, gripper).  Cameras: head + wrist.
+# Gripper convention: GR00T 0=close → binary_close_negative (negated).
+#
+# Hierarchical smoke config for GR00T × LIBERO.
+
+name: libero_spatial_groot_smoke_liten
+
+vla: groot
+vla_url: http://localhost:5108
+
+sim: libero
+sim_url: http://localhost:5300
+suite: libero_spatial
+
+episodes_per_task: 10
+max_tasks: 1
+
+# LIBERO consumes 7-dim EEF delta (Δxyz + Δaxisangle + gripper).
+delta_actions: true
+
+
+# Hierarchical mode: VLM planner via Qwen3.6-27B-FP8 on vLLM localhost:8000
+no_vlm: false
+vlm_model: Qwen/Qwen3.6-27B-FP8
+vlm_endpoint: localhost:8000
+
+eval_python: ""
+
+output_dir: results/libero_spatial_groot_smoke
+
+params: {}
