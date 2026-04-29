@@ -1,8 +1,7 @@
 """Tests for SimWrapper space negotiation and image transform.
 
-Replaces the old _translate_action() tests. The new architecture uses
-strict identity matching: VLA and sim action spaces must match exactly
-(type + dim), with no padding, truncation, or translation.
+VLA and sim action spaces must match exactly by type and dimension, with no
+padding, truncation, or translation.
 """
 import numpy as np
 import pytest
@@ -67,7 +66,7 @@ class TestNegotiateSpaces:
             SimWrapper._negotiate_spaces(w)
 
     def test_dim_mismatch_6_to_7_raises(self):
-        """No automatic padding from 6→7 (old SmolVLA padding is gone)."""
+        """No automatic padding from 6 to 7 dimensions."""
         w = _StubWrapper(
             policy_action_space={"type": "eef_delta", "dim": 6},
             sim_action_space={"type": "eef_delta", "dim": 7},

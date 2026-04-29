@@ -101,6 +101,13 @@ no_vlm: true
         assert cfg.episodes_per_task == 3
         assert cfg.max_tasks == 2
 
+    def test_from_dict_preserves_single_named_task(self):
+        cfg = EvalConfig.from_dict(
+            {"name": "mw", "sim": "metaworld", "suite": "", "task": "button-press-v2"}
+        )
+        assert cfg.task == "button-press-v2"
+        assert cfg.tasks == []
+
 
 # ---------------------------------------------------------------------------
 # Sharding tests
@@ -185,6 +192,21 @@ class TestSharding:
         orch = Orchestrator(config=cfg, shard_id=0, num_shards=1)
         items = self._get_work_items(orch)
         assert len(items) == 8
+
+    def test_named_task_config_builds_single_named_work_item(self):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "metaworld",
+                "sim": "metaworld",
+                "suite": "",
+                "task": "button-press-v2",
+                "episodes_per_task": 2,
+                "output_dir": "/tmp",
+            }
+        )
+        orch = Orchestrator(config=cfg)
+        items = self._get_work_items(orch)
+        assert items == [("button-press-v2", 0), ("button-press-v2", 1)]
 
 
 # ---------------------------------------------------------------------------

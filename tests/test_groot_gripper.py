@@ -19,13 +19,12 @@ def test_groot_gripper_binarization():
     project_root = Path(__file__).parent.parent
     sys.path.insert(0, str(project_root))
 
-    # We can't fully test groot_policy without loading the actual model,
-    # but we can test the core logic by importing and testing the helper function
+    # Exercise the gripper conversion logic without loading the model.
     from sims.vla_policies import groot_policy
 
-    # Simulate what _flatten_action_chunk does with gripper binarization
+    # Apply the same binarization and convention conversion used by actions.
     def mock_flatten_with_gripper_fix(flat_action):
-        """Simulate the gripper fix logic."""
+        """Apply gripper binarization and convention conversion."""
         gripper = 1.0 if flat_action[-1] > 0.0 else -1.0
         flat_action[-1] = -gripper
         return flat_action
@@ -54,7 +53,7 @@ def test_groot_gripper_binarization():
 def test_gripper_transitions_in_sequence():
     """Test that a sequence of gripper actions produces transitions."""
     def mock_flatten_with_gripper_fix(flat_action):
-        """Simulate the gripper fix logic."""
+        """Apply gripper binarization and convention conversion."""
         flat_action = flat_action.copy()
         gripper = 1.0 if flat_action[-1] > 0.0 else -1.0
         flat_action[-1] = -gripper
@@ -81,21 +80,20 @@ def test_gripper_transitions_in_sequence():
 def test_gripper_not_stuck_at_zero():
     """Test that zero or near-zero gripper values don't stay stuck."""
     def mock_flatten_with_gripper_fix(flat_action):
-        """Simulate the gripper fix logic."""
+        """Apply gripper binarization and convention conversion."""
         flat_action = flat_action.copy()
         gripper = 1.0 if flat_action[-1] > 0.0 else -1.0
         flat_action[-1] = -gripper
         return flat_action
 
-    # Before the fix, continuous values like 0.04, -0.05, 0.09 would be passed as-is
-    # After the fix, they should be binarized
+    # Continuous gripper values should be binarized before they reach the backend.
     continuous_grippers = [0.04, -0.05, 0.09, 0.02, -0.01]
 
     for gripper_val in continuous_grippers:
         action = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, gripper_val])
         result = mock_flatten_with_gripper_fix(action)
 
-        # After fix, should be exactly -1.0 or 1.0, not the original continuous value
+        # Output should be exactly -1.0 or 1.0, not the original continuous value.
         assert result[-1] in [-1.0, 1.0], f"Gripper {gripper_val} should binarize to -1.0 or 1.0, got {result[-1]}"
         assert result[-1] != gripper_val, f"Gripper value {gripper_val} should be transformed, not left as-is"
 

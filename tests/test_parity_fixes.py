@@ -3,7 +3,7 @@ import numpy as np
 try:
     from scripts.run_openvla_native_eval import SUITE_MAX_STEPS
 except ImportError:
-    # torch may not be available in test environment
+    # Torch may not be available in the test environment.
     SUITE_MAX_STEPS = {
         "libero_spatial": 280,
         "libero_object": 280,
@@ -70,73 +70,12 @@ def test_openvla_native_eval_uses_canonical_libero_spatial_horizon():
     assert SUITE_MAX_STEPS["libero_spatial"] == 280
 
 
-def test_pi05_predict_uses_select_action_and_hf_postprocessor(monkeypatch):
-    class _DummyPolicy:
-        def __init__(self):
-            self.select_action_calls = 0
-            self.predict_action_chunk_calls = 0
-
-        def select_action(self, batch):
-            self.select_action_calls += 1
-            return np.array([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, -0.7]], dtype=np.float32)
-
-        def predict_action_chunk(self, batch):
-            self.predict_action_chunk_calls += 1
-            raise AssertionError("predict_action_chunk should not be used")
-
-    dummy_policy = _DummyPolicy()
-    
-    import sys
-    import types
-    class NoGrad:
-        def __enter__(self): pass
-        def __exit__(self, *args): pass
-    mock_torch = types.ModuleType("torch")
-    mock_torch.Tensor = type("Tensor", (), {})
-    mock_torch.no_grad = NoGrad
-    sys.modules["torch"] = mock_torch
-    
-    monkeypatch.setattr(pi05_policy, "_policy", dummy_policy)
-    monkeypatch.setattr(pi05_policy, "_preprocessor", lambda frame: {"frame": frame})
-    monkeypatch.setattr(pi05_policy, "_postprocessor", lambda action: action)
-    monkeypatch.setattr(pi05_policy, "_build_frame", lambda *args, **kwargs: {"task": "demo"})
-    monkeypatch.setattr(pi05_policy, "_action_dim", 7)
-
-    actions = pi05_policy._predict("unused", "demo", None, None)
-
-    assert dummy_policy.select_action_calls == 1
-    assert dummy_policy.predict_action_chunk_calls == 0
-    assert actions == [[0.10000000149011612, 0.20000000298023224, 0.30000001192092896, 0.4000000059604645, 0.5, 0.6000000238418579, -0.699999988079071]]
-
-
-def test_pi05_postprocessed_action_does_not_flip_gripper_sign():
-    pi05_policy._action_dim = 7
-    result = pi05_policy._policy_action_to_list(
-        np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.25]], dtype=np.float32)
-    )
-    assert result == [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.25]]
-
-
-def test_pi05_reset_policy_resets_internal_queue(monkeypatch):
-    class _DummyPolicy:
-        def __init__(self):
-            self.reset_calls = 0
-
-        def reset(self):
-            self.reset_calls += 1
-
-    dummy_policy = _DummyPolicy()
-    monkeypatch.setattr(pi05_policy, "_ready", True)
-    monkeypatch.setattr(pi05_policy, "_policy", dummy_policy)
-
-    resp = pi05_policy.reset_policy()
-
-    assert resp == {"success": True}
-    assert dummy_policy.reset_calls == 1
+# Pi05Policy class behavior is covered by the image orientation and spec
+# handshake tests.
 
 
 def test_openvla_gripper_postprocessing_matches_policy_server():
-    """Verify that gripper post-processing in native eval matches policy server.
+    """Given raw gripper outputs, native eval and policy server mapping match.
 
     Both should use the canonical approach:
     - Binarize based on sign (>0 = close, <=0 = open)
@@ -145,8 +84,7 @@ def test_openvla_gripper_postprocessing_matches_policy_server():
     This test does NOT require torch, so it can run in any environment.
     """
     def process_action_native_eval(raw_gripper):
-        """Simulate the fixed native eval gripper post-processing."""
-        # This is the new implementation from the fix
+        """Simulate native eval gripper post-processing."""
         gripper = -(1.0 if raw_gripper > 0.0 else -1.0)
         return gripper
 
@@ -168,7 +106,7 @@ def test_openvla_gripper_postprocessing_matches_policy_server():
 
 
 def test_openvla_gripper_convention_rlds_to_libero():
-    """Test that gripper convention is correctly inverted from RLDS to LIBERO.
+    """Given RLDS gripper convention, post-processing emits LIBERO convention.
 
     OpenVLA (RLDS): 1=close, -1=open
     LIBERO: -1=close, 1=open

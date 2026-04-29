@@ -80,7 +80,8 @@ class EvalConfig:
 
     # Task selection
     suite: str = "libero_spatial"
-    tasks: list[int] = field(default_factory=list)
+    task: str | None = None
+    tasks: list[int | str] = field(default_factory=list)
     max_tasks: int | None = None
 
     # Episodes
@@ -116,8 +117,13 @@ class EvalConfig:
         cfg.sim_url = d.get("sim_url", "http://localhost:5300")
         cfg.sim = d.get("sim", "libero")
         cfg.suite = d.get("suite", "libero_spatial")
+        task_raw = d.get("task", None)
+        cfg.task = str(task_raw) if task_raw not in (None, "") else None
         tasks_raw = d.get("tasks", [])
-        cfg.tasks = [int(t) for t in tasks_raw] if tasks_raw else []
+        cfg.tasks = [
+            int(t) if str(t).isdigit() else str(t)
+            for t in tasks_raw
+        ] if tasks_raw else []
         cfg.max_tasks = d.get("max_tasks", None)
         cfg.episodes_per_task = int(d.get("episodes_per_task", 10))
         cfg.episode_timeout_seconds = int(d.get("episode_timeout_seconds", 1800))
@@ -149,6 +155,7 @@ class EvalConfig:
             "sim_url": self.sim_url,
             "sim": self.sim,
             "suite": self.suite,
+            "task": self.task,
             "tasks": self.tasks,
             "max_tasks": self.max_tasks,
             "episodes_per_task": self.episodes_per_task,
@@ -221,7 +228,7 @@ class Orchestrator:
             return {}
 
         # Build flat (task_id, episode) work items
-        work_items: list[tuple[int, int]] = []
+        work_items: list[tuple[int | str, int]] = []
         for task_id in tasks:
             for ep in range(cfg.episodes_per_task):
                 work_items.append((task_id, ep))
@@ -295,11 +302,13 @@ class Orchestrator:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _build_task_list(self) -> list[int]:
+    def _build_task_list(self) -> list[int | str]:
         """Build the list of task IDs to evaluate."""
         cfg = self.config
         if cfg.tasks:
             tasks = list(cfg.tasks)
+        elif cfg.task:
+            tasks = [cfg.task]
         else:
             # Default: tasks 0..max_tasks-1 or all tasks in suite
             # Fall back to a reasonable default for libero suites
@@ -400,7 +409,7 @@ class Orchestrator:
         except OSError as e:
             logger.debug("Could not write progress file: %s", e)
 
-    def _build_subprocess_cmd(self, task_id: int, episode: int) -> list[str]:
+    def _build_subprocess_cmd(self, task_id: int | str, episode: int) -> list[str]:
         """Build the run_sim_eval.py subprocess command line."""
         cfg = self.config
 
@@ -450,7 +459,7 @@ class Orchestrator:
         env.update(self.extra_env)
         return env
 
-    def _run_episode(self, task_id: int, episode: int) -> dict[str, Any]:
+    def _run_episode(self, task_id: int | str, episode: int) -> dict[str, Any]:
         """Run a single episode via subprocess and collect the result.
 
         Returns an EpisodeResult dict.
@@ -489,7 +498,7 @@ class Orchestrator:
 
         if proc.returncode != 0:
             logger.warning(
-                "Episode task=%d ep=%d exited with code %d",
+                "Episode task=%s ep=%d exited with code %d",
                 task_id,
                 episode,
                 proc.returncode,
@@ -530,7 +539,7 @@ class Orchestrator:
         return result
 
     def _read_episode_json(
-        self, suite: str, task_id: int, episode: int
+        self, suite: str, task_id: int | str, episode: int
     ) -> dict[str, Any] | None:
         """Read the episode JSON file written by episode_logger.
 
