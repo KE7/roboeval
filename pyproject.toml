@@ -3,24 +3,55 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 # ---------------------------------------------------------------------------
-# IMPORTANT: Simulator and VLA dependencies are NOT installed here.
-# Each simulator/VLA runs in its own isolated uv venv with a specific Python
-# version. See requirements/ directory for per-component dependency files.
+# Dependency model
 #
-# Simulators/VLAs managed separately:
-#   - LIBERO / LIBERO-Pro  → .venvs/libero/       (Python 3.8)
-#   - RoboCasa             → .venvs/robocasa/      (Python 3.11)
-#   - RoboTwin 2.0         → .venvs/robotwin/      (Python 3.10)
-#   - VLA service (Pi0.5)  → .venvs/vla/           (Python 3.11)
-#   - LiteLLM proxy        → .venvs/litellm/       (Python 3.11)
+# The top-level `robo-eval` package is the orchestrator (Python 3.13 venv, supports ≥3.11).
+# Simulator and VLA backends run in isolated venvs because they have
+# incompatible Python version and dependency requirements:
+#
+#   Component      Venv                  Python   Extra
+#   ─────────────  ────────────────────  ───────  ──────────
+#   Pi 0.5         .venvs/pi05           3.11     pi05
+#   OpenVLA        .venvs/openvla        3.11     openvla
+#   SmolVLA        .venvs/smolvla        3.11     smolvla
+#   GR00T-N1.6     .venvs/groot          3.11     groot
+#   Cosmos-Policy  .venvs/cosmos         3.11     cosmos
+#   InternVLA-A1   .venvs/internvla      3.11     internvla
+#   VQ-BeT         .venvs/vqbet          3.11     vqbet
+#   LIBERO         .venvs/libero         3.8      libero
+#   LIBERO-Pro     .venvs/libero_pro     3.8      libero_pro
+#   RoboCasa       .venvs/robocasa       3.11     robocasa
+#   RoboTwin 2.0   .venvs/robotwin       3.10     robotwin
+#   LiteLLM/VLM    .venvs/litellm        3.11     vlm
+#
+# One-command setup:
+#   ./scripts/setup.sh pi05 libero        # provisions only Pi 0.5 + LIBERO
+#   ./scripts/setup.sh --help             # full usage
+#
+# Manual per-venv install (Python 3.11 components):
+#   uv venv .venvs/pi05 --python 3.11
+#   uv pip install --python .venvs/pi05/bin/python -e ".[pi05]"
+#
+# For Python 3.8 / 3.10 components, see docs/install.md — requirements/ files
+# are used instead of extras because requires-python = ">=3.11" blocks -e . installs.
 # ---------------------------------------------------------------------------
 
 [project]
 name = "robo-eval"
 version = "0.1.0"
-description = "Unified CLI for Vision-Language-Action model evaluation on robotics benchmarks."
-license = { text = "MIT" }
-requires-python = ">=3.10"
+description = "A reproducible evaluation harness for Vision-Language-Action models on robotics benchmarks."
+authors = [
+    {name = "Karim Elmaaroufi", email = "k.e@berkeley.edu"},
+]
+license = {text = "BSD-3-Clause"}
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = ["robotics", "vla", "evaluation", "benchmark", "libero"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: BSD License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 
 dependencies = [
     "numpy",
@@ -38,18 +69,527 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest",
-    "ruff",
-    "black",
+# ---------------------------------------------------------------------------
+# VLA backends — each installs into its own dedicated venv via setup.sh.
+# Python version notes:
+#   pi05     → 3.12  (lerobot[pi]==0.5.2 requires Python>=3.12)
+#   all others → 3.11
+# ---------------------------------------------------------------------------
+
+# Pi 0.5 (Physical Intelligence π0.5) via LeRobot.
+# Model: lerobot/pi05_libero_finetuned (~7.4 GB) or lerobot/pi05_base (~8 GB).
+# Hardware: CUDA GPU, ~8 GB VRAM.
+#
+# NOTE on lerobot[pi] — NOT listed here intentionally.
+#   lerobot>=0.5.0 (PyPI) requires Python>=3.12 AND pins transformers>=5.3.0,
+#   which conflicts with openvla's transformers==4.40.1 in the `all` extra.
+#   The working venvs use lerobot 0.4.5 (installed from git; not on PyPI) which
+#   uses Python>=3.10 and a custom transformers branch (fix/lerobot_openpi).
+#   setup.sh installs lerobot[pi] via:
+#     uv pip install "lerobot[pi] @ git+https://github.com/huggingface/lerobot.git@v0.4.5"
+#   This dependency cannot be expressed in the lockfile without breaking openvla.
+pi05 = [
+    "torch>=2.0",
+    "transformers>=4.40",
+    "accelerate>=0.28",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    # lerobot[pi]: installed by setup.sh separately (see note above)
 ]
+
+# === START vqbet ===
+# VQ-BeT (Vector-Quantized Behavior Transformer) via LeRobot.
+# Canonical checkpoint: lerobot/vqbet_pusht (~50 MB) — the canonical PushT eval
+# from the original BeT paper, enabling a direct VQ-BeT vs Diffusion Policy
+# head-to-head comparison on identical gym_pusht observations.
+#
+# Architecturally distinct from pi05/openvla (autoregressive transformer) and
+# Diffusion Policy (DDPM): vector-quantizes actions via VQ-VAE, then predicts
+# action codes with a transformer.  Bundled with the base lerobot package.
+#
+# Pinned to lerobot==0.4.4 — same Python 3.11 baseline as diffusion_policy.
+vqbet = [
+    "torch>=2.0",
+    "lerobot==0.4.4",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+]
+# === END vqbet ===
+
+# OpenVLA 7B via HuggingFace Transformers.
+# Model: openvla/openvla-7b (~14 GB). Hardware: CUDA GPU, ~14 GB VRAM.
+#
+# CRITICAL: transformers MUST be pinned to exactly 4.40.1.
+#   - transformers 5.x removed AutoModelForVision2Seq entirely (import error).
+#   - transformers 4.41–4.57+ silently breaks openvla's predict_action image
+#     conditioning: responses are 200 OK but actions are degraded (0/15 success
+#     vs the published 71% baseline). Root cause: modeling_prismatic.py was
+#     written against the 4.40.1 API. See results/openvla_regression_diag_*/REPORT.md.
+#   - Do NOT pass attn_implementation="eager" in the venv; 4.40.1 has working
+#     SDPA for this model and eager triggers a causal-mask shape mismatch.
+openvla = [
+    "torch>=2.0",
+    "transformers==4.40.1",
+    "accelerate>=0.28",
+    "timm>=0.9.10,<1.0.0",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+]
+
+# SmolVLA via LeRobot.
+# Uses lerobot's make_pre_post_processors for byte-for-byte compatible preprocessing.
+# Pinned to lerobot[smolvla]==0.4.4 (PyPI) — the last version that supports Python 3.11
+# with transformers<5.0. Lerobot >=0.5.0 requires Python>=3.12.
+smolvla = [
+    "torch>=2.0",
+    "lerobot[smolvla]==0.4.4",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+]
+
+# GR00T-N1.6 (NVIDIA Isaac GR00T, pinned to a tested public revision).
+# NOTE: `gr00t` itself is NOT on PyPI.  `setup.sh` clones Isaac-GR00T, checks out
+# the pinned N1.6 revision, and `uv pip install -e`s it (with deps from gr00t's own
+# pyproject — transformers==4.51.3, torch==2.7.1, etc.).  These extras are the
+# server-side closure (FastAPI + image utils) plus aarch64 lib provisioners.
+# Default LIBERO checkpoint: 0xAnkitSingh/GR00T-N1.6-LIBERO  (94.9% LIBERO avg).
+# Default RoboCasa checkpoint: nvidia/GR00T-N1.6-3B with ROBOCASA_PANDA_OMRON tag.
+groot = [
+    "torch>=2.0",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    "huggingface-hub>=0.20",
+    # === START groot_nvpl ===
+    # NVIDIA Performance Libraries wheel — ships libnvpl_*.so files inside
+    # site-packages so scipy/GR00T can find libnvpl_lapack_lp64_gomp.so.0 on aarch64
+    # without sudo, apt, or ~/.local/lib/nvpl/.  On x86_64 the wheel is a stub (~8 kB).
+    "nvpl==25.11",
+    # === END groot_nvpl ===
+    # === START groot_libcudss ===
+    # NVIDIA cuDSS runtime wheel — ships libcudss.so.0 inside
+    # site-packages/nvidia/cu13/lib/.  The Jetson SBSA torch build has RPATH
+    # $ORIGIN/../../nvidia/cu13/lib baked into libtorch_cuda.so, so the linker finds
+    # libcudss.so.0 automatically without LD_LIBRARY_PATH, sudo, or apt.
+    # Wheel: 64.9 MB aarch64 (manylinux_2_17).
+    "nvidia-cudss-cu13",
+    # === END groot_libcudss ===
+]
+
+# Cosmos-Policy (NVIDIA, for RoboCasa).
+# NOTE: `cosmos_policy` is NOT on PyPI.
+#   Download checkpoint from https://huggingface.co/nvidia/Cosmos-Policy and
+#   follow docs/install.md for the manual install path.
+cosmos = [
+    "torch>=2.0",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    "huggingface-hub>=0.20",
+    # === START cosmos_runtime ===
+    # Full transitive runtime closure for cosmos_policy model load.
+    # cosmos_policy is installed --no-deps so its transitive imports must be pinned here.
+    # Import chain: model_loader → imaginaire.lazy_config.registry → fvcore
+    #               model_loader → imaginaire.lazy_config.lazy → file_io → iopath
+    #               model_loader → imaginaire.utils.distributed → pynvml (nvidia-ml-py)
+    # fvcore itself pulls in iopath, yacs, tabulate, termcolor as transitive deps
+    # (all three are safe to install without the NVIDIA custom index).
+    "fvcore>=0.1.5.post20221221",   # registry.py: from fvcore.common.registry import Registry
+    "iopath>=0.1.10",               # file_io.py: from iopath.common.file_io import ...
+    "nvidia-ml-py>=13.580.82",      # distributed.py: import pynvml (top-level)
+    # === END cosmos_runtime ===
+    # === START cosmos_runtime_continued ===
+    # Continuation of the cosmos model_loader import cascade.
+    # Import chain (continued): callback.py → wandb
+    #                           easy_io/backends/boto3_client.py → boto3
+    #                           easy_io/backends/msc_backend.py → multistorageclient (from multi-storage-client)
+    #                           easy_io/handlers/pandas_handler.py → pandas
+    "wandb>=0.12",                  # callback.py: import wandb
+    "boto3>=1.20",                  # boto3_client.py: import boto3
+    "multi-storage-client>=0.32",   # msc_backend.py: from multistorageclient import StorageClient
+    "pandas>=1.3",                  # pandas_handler.py: import pandas as pd
+    # === END cosmos_runtime_continued ===
+]
+
+# InternVLA-A1 (InternRobotics, for RoboTwin).
+# NOTE: the InternVLA-A1 lerobot fork is NOT on PyPI.
+#   Install from: https://github.com/InternRobotics/InternVLA-A1
+#   (includes patched lerobot with InternVLA extensions)
+# === START internvla_runtime ===
+# Full runtime closure for InternVLA-A1.
+# InternVLA-A1/pyproject.toml pins huggingface-hub<0.36.0 which conflicts with modern
+# transformers (needed for Qwen3VL). setup.sh installs InternVLA-A1 with --no-deps to
+# bypass that constraint, so the extras here do NOT carry the <0.36.0 bound.
+# Also adds mediapy, loguru, omegaconf — imported by InternVLA-A1 code but missing
+# from its upstream pyproject.toml deps.
+internvla = [
+    "torch>=2.0",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    "huggingface-hub[hf-transfer,cli]>=0.20",
+    "transformers>=4.52,<5.0",
+    "datasets>=4.0.0,<4.2.0",
+    "diffusers>=0.27.2,<0.36.0",
+    "accelerate>=1.10.0,<2.0.0",
+    "einops>=0.8.0,<0.9.0",
+    "opencv-python-headless>=4.9.0,<4.13.0",
+    "av>=15.0.0,<16.0.0",
+    "jsonlines>=4.0.0,<5.0.0",
+    "packaging>=24.2",
+    "wandb>=0.20.0,<0.22.0",
+    "draccus==0.10.0",
+    "gymnasium>=1.1.1,<2.0.0",
+    "rerun-sdk>=0.24.0,<0.27.0",
+    "deepdiff>=7.0.1",
+    "imageio[ffmpeg]>=2.34.0,<3.0.0",
+    "termcolor>=2.4.0",
+    "mediapy",
+    "loguru",
+    "omegaconf",
+    "safetensors>=0.4.0",
+    "tqdm",
+    "torchvision>=0.21.0",
+]
+# === END internvla_runtime ===
+
+# ACT (Action Chunking Transformer) via LeRobot.
+# Model: lerobot/act_aloha_sim_transfer_cube_human (~300 MB) — default.
+#        lerobot/act_aloha_sim_insertion_human      (~300 MB) — AlohaInsertion-v0.
+# Hardware: CUDA GPU, ~2 GB VRAM (ACT is a small CNN+Transformer model).
+# Action space: 14-dim absolute joint positions (7 joints × 2 arms, bimanual ALOHA).
+# Paired sim: gym-aloha (see aloha_gym extra).
+#
+# lerobot version: >=0.4.4 (same series as smolvla) — the last PyPI release with
+# Python>=3.10 support.  ACTPolicy is available at both the old path
+# (lerobot.common.policies.act) and the 0.4.x path (lerobot.policies.act);
+# act_policy.py tries both with a try/except fallback import.
+act = [
+    "torch>=2.0",
+    "lerobot>=0.4.4",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+]
+
+# NOTE: The `[octo]` extra was REMOVED in v0.1 (2026-04-26).
+#   Reason: octo's transitive dep `dlimp==0.0.1` upstream-pins TF==2.15.0,
+#   which on aarch64 installs `tensorflow_cpu_aws` — an empty stub with no
+#   `tf.image` module — breaking `from octo.model.octo_model import OctoModel`
+#   at import time.  No reconcilable TF pin satisfies both dlimp and tf.image
+#   on aarch64 in v0.1.
+#   Replacement: the `[vqbet]` extra (below) ships VQ-BeT (lerobot/vqbet_pusht)
+#   in a vector-quantized action family architecturally distinct from both
+#   pi05 (flow-matching) and Diffusion Policy (DDPM), enabling a direct
+#   VQ-BeT vs Diffusion Policy head-to-head comparison on canonical PushT.
+#   Restoration of octo is tracked for v0.1.1 if dlimp upstream relaxes
+#   its TF pin.
+
+# === START tdmpc2 ===
+# TDMPC2 (Hansen et al. 2024) — model-based RL world-model + MPPI planner.
+# Default checkpoint: nicklashansen/tdmpc2 (HF, MIT-licensed) — single-task metaworld.
+# Action space: 4-dim Sawyer eef-delta — exact match for the metaworld sim
+# backend (unblocks metaworld from spec-gate-only to full e2e).
+# Paradigm: model-based RL (the first non-imitation VLA in the roster).
+#
+# Install note: nicklashansen/tdmpc2 upstream has no pyproject.toml — not
+# pip-installable via PyPI.  setup_tdmpc2() in scripts/setup.sh clones the
+# upstream repo, adds a thin shim, and installs as an editable package.
+# The `tensordict` dep below is required by the upstream's vectorised
+# Q-function Ensemble (TensorDictParams API).  `lerobot>=0.4.4` provides
+# infrastructure (HF-hub download, server base); the upstream package is the
+# actual TDMPC2 implementation.
+tdmpc2 = [
+    "torch>=2.0",
+    "lerobot>=0.4.4",
+    "tensordict>=0.6",       # required by upstream tdmpc2 vectorised Q-ensemble
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    # The upstream tdmpc2 package itself is NOT on PyPI; it is installed by
+    # setup_tdmpc2() as a vendored editable install.  Do NOT add it here.
+]
+# === END tdmpc2 ===
+
+# === START diffusion_policy ===
+# Diffusion Policy via LeRobot (DDPM-based visuomotor policy).
+# Canonical checkpoint: lerobot/diffusion_pusht (2-dim PushT control, ~50 MB).
+# Alternative:          lerobot/diffusion_aloha_sim_insertion_human (14-dim ALOHA).
+#
+# DiffusionPolicy is bundled with the base lerobot package — no extra is needed
+# beyond lerobot>=0.4.4.  We do NOT pull in lerobot[smolvla] because that extra
+# pins transformers (needed for SmolVLA's LLM backbone) which is unnecessary for
+# a pure-diffusion policy and would create venv conflicts.
+#
+# Pinned to lerobot==0.4.4 — last PyPI release with Python 3.11 support that
+# predates the transformers>=5.0 requirement introduced in lerobot>=0.5.0.
+diffusion_policy = [
+    "torch>=2.0",
+    "lerobot==0.4.4",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+]
+# === END diffusion_policy ===
+
+# ---------------------------------------------------------------------------
+# Simulator backends
+#
+# libero / libero_pro use Python 3.8 — `uv pip install -e .[libero]` won't
+# work in a 3.8 venv because requires-python=>=3.11 blocks it.
+# setup.sh installs these via requirements/ files directly.
+# The extras below are kept for documentation purposes and for any future
+# Python 3.11-compatible LIBERO variant.
+#
+# robotwin uses Python 3.10 — same caveat applies.
+# ---------------------------------------------------------------------------
+
+# LIBERO benchmark (MuJoCo, robosuite 1.x).
+# Python 3.8 required; see docs/install.md.
+# Datasets must be downloaded separately and symlinked under ~/.libero/.
+libero = [
+    "h5py>=3.8",
+    "bddl>=3.0.0",
+    "mujoco>=2.3.7",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    "robosuite @ git+https://github.com/ARISE-Initiative/robosuite.git@master",
+    "libero @ git+https://github.com/Lifelong-Robot-Learning/LIBERO.git",
+]
+
+# LIBERO-Pro (Zxy-MLlab fork, extended task suites).
+# Python 3.8 required. libero-pro is installed from a local clone by setup.sh;
+# the fork is not on PyPI and must be checked out separately.
+libero_pro = [
+    "h5py>=3.8",
+    "bddl>=3.0.0",
+    "mujoco>=2.3.7",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    "robosuite @ git+https://github.com/ARISE-Initiative/robosuite.git@master",
+    # libero-pro itself: installed from local clone by setup.sh
+    # git clone https://github.com/Zxy-MLlab/LIBERO-PRO.git
+]
+
+# === START libero_infinity ===
+# LIBERO-Infinity (Scenic-based perturbation testing on LIBERO environments).
+# Python 3.11 required (libero-infinity on PyPI requires >=3.11).
+# LIBERO upstream is cloned by setup.sh into $ROBO_EVAL_VENDORS_DIR/LIBERO
+# and installed editable into .venvs/libero_infinity alongside libero-infinity.
+libero_infinity = [
+    "h5py>=3.8",
+    "bddl>=3.0.0",
+    "mujoco>=2.3.7",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    "scenic>=3.0.0",
+    "robosuite @ git+https://github.com/ARISE-Initiative/robosuite.git@master",
+    # libero-infinity itself (PyPI, requires Python >=3.11):
+    "libero-infinity>=0.1.0",
+    # LIBERO upstream: installed editable from local clone by setup.sh
+    # git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git
+]
+# === END libero_infinity ===
+
+# RoboCasa (kitchen environments, mobile Panda).
+# Python 3.11. Assets (~10 GB) auto-downloaded to ~/.robocasa/ on first run.
+# Rendering: set MUJOCO_GL=egl for headless.
+robocasa = [
+    "mujoco>=2.3.7",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    "robosuite @ git+https://github.com/ARISE-Initiative/robosuite.git@master",
+    "robocasa @ git+https://github.com/robocasa/robocasa.git",
+]
+
+# RoboTwin 2.0 (SAPIEN-based bimanual, aloha-agilex).
+# Python 3.10 required; same caveat as libero re: requires-python.
+# NOTE: sapien is on a nightly index, not PyPI:
+#   pip install sapien --pre --extra-index-url https://storage.googleapis.com/sapien-nightly/
+# NOTE: RoboTwin itself must be cloned into $ROBO_EVAL_VENDORS_DIR/RoboTwin.
+# CRITICAL import order: `import torch` MUST come before `import sapien` in the same process.
+robotwin = [
+    "torch>=2.0",
+    "pyyaml>=6.0",
+    "pillow>=9.0",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    # === START robotwin_hfhub ===
+    "huggingface-hub>=0.20",
+    # === END robotwin_hfhub ===
+    # sapien: installed from nightly index by setup.sh (not on PyPI)
+    # robotwin: installed from local vendor clone by setup.sh
+]
+
+# gym-aloha (HuggingFace's pure-Python ALOHA bimanual sim).
+# Pure PyPI install path — no SAPIEN, no curobo, no mplib, no conda.
+# Same 14-dim joint_pos action contract as RoboTwin → InternVLA drives it.
+# Python 3.10+ (gymnasium 0.29+ + dm_control aarch64 wheels available).
+aloha_gym = [
+    "gym-aloha>=0.1.3",
+    "gymnasium>=0.29",
+    "mujoco>=2.3.7",
+    "dm-control>=1.0.14",
+    "numpy>=1.24",
+    "pillow>=9.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+]
+
+# === START gym_pusht ===
+# gym-pusht (HuggingFace PushT pushing benchmark).
+# Canonical companion sim to Diffusion Policy — the original DP paper used PushT.
+# Pure PyPI: gym-pusht pulls pygame + pymunk transitively.
+# Python 3.11+, no MuJoCo, no conda, aarch64-clean.
+gym_pusht = [
+    "gym-pusht>=0.1.5",
+    "gymnasium>=0.29",
+    "numpy>=1.24",
+    "pillow>=9.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+]
+# === END gym_pusht ===
+
+
+# === START maniskill2 ===
+# ManiSkill2 (Hao Su lab, SAPIEN-based manipulation benchmark).
+#
+# ⚠  aarch64 INSTALL BLOCKER (as of 2026-04-26)
+#    mani_skill2==0.5.3 requires sapien==2.2.2, which ships ONLY
+#    manylinux2014_x86_64 wheels on PyPI.  SAPIEN 3 has aarch64 wheels, but
+#    using them would require a ManiSkill3 backend migration.  This extra
+#    documents the correct x86_64 deps; the backend in sim_worker.py raises
+#    RuntimeError on aarch64 with a clear pointer.
+#
+# Python   : 3.9+
+# Renderer : SAPIEN (sapien==2.2.2, x86_64 only on PyPI)
+# Action   : pd_ee_delta_pose 7-dim (6 EEF delta + 1 gripper)
+# Tasks    : PickCube-v0, StackCube-v0, PegInsertionSide-v0
+# Install  : ./scripts/setup.sh maniskill2
+#
+# Note: sapien==2.2.2 is NOT pinned here to avoid polluting solver state for
+# aarch64 CI.  setup.sh installs it explicitly with --extra-index-url if
+# needed on x86_64.  See docs/install.md#maniskill2.
+maniskill2 = [
+    "mani_skill2==0.5.3",
+    "numpy<1.24",
+    "scipy",
+    "gymnasium>=0.28.1",
+    "h5py",
+    "pyyaml>=6.0",
+    "pillow>=9.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    "transforms3d",
+    "trimesh",
+    # sapien==2.2.2 is installed by setup.sh; NOT listed here because it has
+    # no aarch64 wheel and would break `uv pip install -e .[maniskill2]` on
+    # aarch64 machines.  x86_64: setup.sh runs
+    #   uv pip install sapien==2.2.2
+    # after the extra is installed.
+]
+# === END maniskill2 ===
+
+# === START metaworld ===
+# Meta-World (~50 Sawyer single-arm manipulation tasks, MuJoCo).
+#
+# Pure PyPI / pure uv / aarch64-clean — MuJoCo ships official aarch64 wheels;
+# no SAPIEN, no curobo, no conda, no special index required.
+#
+# Python   : 3.11+  (metaworld 2.0.0 requires Python >= 3.9)
+# Renderer : MuJoCo (mujoco.Renderer, corner + behindGripper cameras)
+# Action   : 4-dim eef-delta [dx, dy, dz, gripper]  range [-1, 1]
+# Tasks    : ~50 (button-press-v2, pick-place-v2, door-open-v2, reach-v2, …)
+# Install  : ./scripts/setup.sh metaworld
+#
+# NOTE — action-dim mismatch with current 7-dim VLAs:
+#   Pi0.5 / SmolVLA / OpenVLA all emit 7-dim actions.  The ActionObsSpec gate
+#   will block those pairings (expected in v0.1).  A 4-dim adapter or a
+#   4-dim-native VLA is tracked for v0.2.  See docs/install.md#metaworld.
+metaworld = [
+    "metaworld==2.0.0",
+    "gymnasium>=0.29",
+    "mujoco>=2.3.7",
+    "numpy>=1.24",
+    "pillow>=9.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+]
+# === END metaworld ===
+
+# ---------------------------------------------------------------------------
+# Mode extras
+# ---------------------------------------------------------------------------
+
+# Hierarchical-planner / VLM mode (LiteLLM proxy + Ollama VLM).
+# Prereq: Ollama running with a vision model, e.g. `ollama pull qwen3-vl:latest`.
+vlm = [
+    "litellm>=1.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    "pillow>=9.0",
+    "numpy>=1.24",
+]
+
+# Development / CI toolchain.
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+    "black>=24.0",
+    "scipy>=1.11",
+]
+
+# all — CI-installable superset of non-conflicting extras.
+#
+# Why not everything?
+#   The ML components (VLAs + sims) have mutually incompatible transitive deps
+#   (lerobot 0.3.3 vs 0.4.4, transformers ==4.40.1 vs >=5.3) that prevent them from
+#   sharing a single venv. That's the entire reason setup.sh creates one venv per
+#   component. "all" therefore covers the orchestrator layer only:
+#   dev toolchain + VLM mode + all lockable sim/VLA framework deps (no ML models).
+#
+# To install every VLA + sim in isolated venvs, run:
+#   ./scripts/setup.sh all
+all = [
+    "robo-eval[vlm,dev]",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/KE7/roboeval"
+"Bug Tracker" = "https://github.com/KE7/roboeval/issues"
 
 # ---------------------------------------------------------------------------
 # Console scripts
 # ---------------------------------------------------------------------------
 
 [project.scripts]
-robo-eval = "robo_eval.cli:main"
+# 4-subcommand CLI: run / serve / merge / test
+robo-eval = "robo_eval.cli.main:main"
 
 # ---------------------------------------------------------------------------
 # Other entry points (not registered — run via their specific venvs):
@@ -59,5 +599,89 @@ robo-eval = "robo_eval.cli:main"
 #   scripts/run_openvla_native_eval.py — native OpenVLA eval
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# uv configuration
+# ---------------------------------------------------------------------------
+
+[tool.uv]
+# The ML extras (VLAs + sims) have mutually incompatible transitive deps and
+# are designed to be installed into isolated venvs — never combined.
+# Declaring them as conflicting lets uv lock resolve them independently so
+# that a single uv.lock can cover all extras without requiring a unified
+# solution for the whole dependency graph.
+conflicts = [
+    [
+        {extra = "pi05"},
+        {extra = "openvla"},
+        {extra = "smolvla"},
+        {extra = "groot"},
+        {extra = "cosmos"},
+        {extra = "internvla"},
+        # === START diffusion_policy ===
+        {extra = "diffusion_policy"},
+        # === END diffusion_policy ===
+        # === START tdmpc2 ===
+        {extra = "tdmpc2"},
+        # === END tdmpc2 ===
+        # === START vqbet ===
+        {extra = "vqbet"},
+        # === END vqbet ===
+        {extra = "libero"},
+        {extra = "libero_pro"},
+        {extra = "robocasa"},
+        {extra = "robotwin"},
+        # === START gym_pusht ===
+        {extra = "gym_pusht"},
+        # === END gym_pusht ===
+                # === START metaworld ===
+        {extra = "metaworld"},
+        # === END metaworld ===
+    ],
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
+include = [
+    "robo_eval",
+    "robo_eval.*",
+    "sims",
+    "sims.*",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff — linter + formatter
+# Docs: https://docs.astral.sh/ruff/
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+# Exclude generated stubs, legacy scripts, and heavy sim venvs.
+exclude = [
+    ".git",
+    ".venvs",
+    "__pycache__",
+    "*.egg-info",
+    "world_stubs.py",
+    "monitor_actions.py",
+]
+
+[tool.ruff.lint]
+# E/W: pycodestyle  F: pyflakes  I: isort  UP: pyupgrade  B: flake8-bugbear
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # line-length handled by formatter
+    "B008",  # do-not-perform-function-call-in-default-argument (typer uses this)
+    "UP007", # use X | Y for union types (keep compat with 3.10 sim venvs)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["robo_eval", "sims"]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"

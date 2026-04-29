@@ -74,7 +74,7 @@ class TaskICADir(GenericICADir):
 
 class ReasoningICADir(GenericICADir):
     """
-    Loader and utility for the new ICA directory structure.
+    Loader and utility for ICA reasoning directories.
 
     Loads:
       - image0.png: initial scene image

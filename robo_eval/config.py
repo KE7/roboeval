@@ -1,8 +1,4 @@
-"""
-Configuration constants for VLA servers, simulators, and suite definitions.
-
-All the hard-coded knowledge from the various shell scripts is centralized here.
-"""
+"""Configuration constants for VLA servers, simulators, and suite definitions."""
 
 from __future__ import annotations
 
@@ -20,10 +16,10 @@ _log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# Vendor repos directory (cloned by scripts/setup_envs.sh).
+# Vendor repos directory.
 # Default: ~/.local/share/robo-eval/vendors/
 # Override via ROBO_EVAL_VENDORS_DIR environment variable.
-# .resolve() ensures an absolute path even if the env var is relative (FM W5).
+# .resolve() ensures an absolute path even if the env var is relative.
 VENDORS_DIR = Path(os.environ.get(
     "ROBO_EVAL_VENDORS_DIR",
     str(Path.home() / ".local" / "share" / "robo-eval" / "vendors"),
@@ -36,7 +32,7 @@ def _resolve_libero_infinity_root() -> str | None:
     Resolution order:
       1. ``LIBERO_INFINITY_ROOT`` environment variable (explicit override)
       2. Installed ``libero_infinity`` package (found via importlib)
-      3. Sibling directory ``../libero-infinity`` (legacy dev layout)
+      3. Adjacent checkout ``../libero-infinity`` (local development layout)
 
     Returns the resolved path as a string, or *None* if the package
     cannot be located by any method.
@@ -62,11 +58,11 @@ def _resolve_libero_infinity_root() -> str | None:
     except (ImportError, Exception):
         pass
 
-    # 3. Sibling directory fallback (legacy dev layout)
-    sibling = PROJECT_ROOT.parent / "libero-infinity"
-    if sibling.is_dir():
-        _log.debug("libero-infinity found as sibling directory: %s", sibling)
-        return str(sibling)
+    # 3. Adjacent checkout fallback (local development layout)
+    adjacent = PROJECT_ROOT.parent / "libero-infinity"
+    if adjacent.is_dir():
+        _log.debug("libero-infinity found as adjacent checkout: %s", adjacent)
+        return str(adjacent)
 
     return None
 
@@ -234,10 +230,27 @@ VLA_CONFIGS: Dict[str, VLAConfig] = {
         start_script="scripts/start_internvla_policy.sh",
         model_id="InternRobotics/InternVLA-A1-3B-RoboTwin",
     ),
+    "vqbet": VLAConfig(
+        name="vqbet",
+        port=5108,
+        venv=os.environ.get("ROBO_EVAL_VQBET_VENV", ".venvs/vqbet"),
+        start_script="scripts/start_vqbet_policy.sh",
+        model_id="lerobot/vqbet_pusht",
+    ),
+    "tdmpc2": VLAConfig(
+        name="tdmpc2",
+        port=5109,
+        venv=os.environ.get("ROBO_EVAL_TDMPC2_VENV", ".venvs/tdmpc2"),
+        start_script="scripts/start_tdmpc2_policy.sh",
+        model_id="nicklashansen/tdmpc2",
+    ),
     "groot": VLAConfig(
         name="groot",
         port=5105,
-        venv=os.environ.get("ROBO_EVAL_GROOT_VENV", "../Isaac-GR00T/.venv"),
+        # GR00T requires a dedicated venv (nvidia/Isaac-GR00T deps conflict with lerobot).
+        # Default: .venvs/groot  — override via ROBO_EVAL_GROOT_VENV.
+        # Set ROBO_EVAL_GROOT_VENV explicitly if using a custom layout.
+        venv=os.environ.get("ROBO_EVAL_GROOT_VENV", ".venvs/groot"),
         start_script="scripts/start_groot_policy.sh",
         model_id="nvidia/GR00T-N1.6-3B",
         startup_timeout=600,
@@ -294,7 +307,6 @@ class SimConfig:
     name: str  # "libero", "libero_pro", or "libero_infinity"
     venv: str  # relative to PROJECT_ROOT
     env_vars: Dict[str, str] = field(default_factory=dict)
-    volumes: List[str] = field(default_factory=list)  # extra docker volume mounts
 
     @property
     def venv_python(self) -> Path:
@@ -313,10 +325,14 @@ _ld_library_path = (
 
 # To add a new simulator: add a SimConfig here, implement a backend class in
 # sims/sim_worker.py, and add suites below. See docs/adding_a_benchmark.md.
+
 SIM_CONFIGS: Dict[str, SimConfig] = {
     "libero": SimConfig(
         name="libero",
         venv=os.environ.get("ROBO_EVAL_LIBERO_VENV", ".venvs/libero"),
+        env_vars={
+            "LIBERO_CONFIG_PATH": os.environ.get("LIBERO_CONFIG_PATH", str(Path.home() / ".libero")),
+        },
     ),
     "libero_pro": SimConfig(
         name="libero_pro",
@@ -331,7 +347,7 @@ SIM_CONFIGS: Dict[str, SimConfig] = {
         name="libero_infinity",
         # libero-infinity requires Python 3.11+ (Scenic 3 dependency).
         # It has its own venv separate from the base LIBERO venv (Python 3.8).
-        # Default: .venvs/libero_infinity (created by setup_envs.sh --only libero_infinity).
+        # Default: .venvs/libero_infinity.
         # Override via ROBO_EVAL_LIBERO_INFINITY_VENV for custom layouts (e.g.
         # pointing to the libero-infinity repo's own .venv/).
         venv=os.environ.get("ROBO_EVAL_LIBERO_INFINITY_VENV", ".venvs/libero_infinity"),
@@ -340,12 +356,6 @@ SIM_CONFIGS: Dict[str, SimConfig] = {
     "robocasa": SimConfig(
         name="robocasa",
         venv=os.environ.get("ROBO_EVAL_ROBOCASA_VENV", ".venvs/robocasa"),
-        volumes=[
-            # Mount local robocasa assets into the container (not bundled in image).
-            # Must be rw: robocasa writes generated XML files into the assets dir at runtime.
-            f"{PROJECT_ROOT}/.venvs/robocasa/lib/python3.11/site-packages/robocasa/models/assets"
-            ":/usr/local/lib/python3.11/dist-packages/robocasa/models/assets:rw"
-        ],
     ),
     "robotwin": SimConfig(
         name="robotwin",
@@ -420,7 +430,7 @@ def get_qualified_suites(benchmark: str) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# Derived suite lists (kept for backward compatibility with existing callers)
+# Derived suite lists (kept for compatibility with existing callers)
 # ---------------------------------------------------------------------------
 # New code should use get_qualified_suites(benchmark) instead.
 #
@@ -432,8 +442,8 @@ LIBERO_SUITES = get_qualified_suites("libero")
 #   qualify_suite(), consistent with what SUITE_PRESETS["libero_pro"] returns.
 #   Used by the native-mode filter in cli.py to exclude PRO suites from
 #   lerobot-eval (which doesn't support LIBERO-PRO).
-#   Note: env_wrapper.py / sim_worker.py use the old libero_* names internally;
-#   those are kept in env_wrapper.py:SUITE_MAX_STEPS for backward compat.
+#   Note: env_wrapper.py / sim_worker.py use libero_* names for compatibility;
+#   those are kept in env_wrapper.py:SUITE_MAX_STEPS.
 LIBERO_PRO_SUITES = get_qualified_suites("libero_pro")
 
 LIBERO_INFINITY_SUITES = get_qualified_suites("libero_infinity")
@@ -444,6 +454,19 @@ _SUITE_TO_BENCHMARK: Dict[str, str] = {
     for benchmark, shorts in BENCHMARK_SUITES.items()
     for short in shorts
 }
+
+
+def get_benchmark_for_suite(qualified_suite: str) -> Optional[str]:
+    """Return the benchmark name for a fully-qualified suite name, or None.
+
+    Examples::
+
+        get_benchmark_for_suite('libero_spatial')       -> 'libero'
+        get_benchmark_for_suite('libero_pro_goal_swap') -> 'libero_pro'
+        get_benchmark_for_suite('unknown')              -> None
+    """
+    return _SUITE_TO_BENCHMARK.get(qualified_suite)
+
 
 # Suite presets: name -> list of fully-qualified suite names.
 # All entries are now derived from BENCHMARK_SUITES via qualify_suite.
@@ -490,7 +513,7 @@ SUITE_MAX_STEPS: Dict[str, int] = {
     "libero_pro_spatial_object": 300,
     "libero_pro_goal_swap": 300,
     "libero_pro_spatial_with_mug": 300,
-    # LIBERO-PRO old names (for env_wrapper.py / sim_worker.py backward compat)
+    # LIBERO-PRO compatibility names used by env_wrapper.py / sim_worker.py
     "libero_spatial_object": 300,
     "libero_goal_swap": 300,
     "libero_spatial_with_mug": 300,
@@ -503,6 +526,9 @@ SUITE_MAX_STEPS: Dict[str, int] = {
     "robocasa_kitchen": 500,
     # RoboTwin suite (matches SIM_MAX_STEPS["robotwin"] = 300)
     "robotwin_aloha_agilex": 300,
+    # gym-aloha task suites (gymnasium IDs used as suite names)
+    "AlohaTransferCube-v0": 400,
+    "AlohaInsertion-v0": 400,
 }
 
 # Default for unknown suites (matches lerobot fallback)
@@ -585,7 +611,7 @@ PUBLIC_MODE_NAMES = {
     "vlm": "planner",        # alias for planner
 }
 
-# Internal-only evaluation modes used for parity/debugging.
+# Additional evaluation modes used for parity/debugging.
 INTERNAL_MODE_NAMES = {
     "native": "native",
 }
@@ -624,33 +650,6 @@ EVAL_SCRIPT = PROJECT_ROOT / "run_sim_eval.py"
 VLM_START_SCRIPT = PROJECT_ROOT / "scripts" / "start_vlm.sh"
 DEFAULT_VLM_PORT = 4000
 
-# VLA round-robin proxy
-DEFAULT_PROXY_PORT = 5200
-
-# ---------------------------------------------------------------------------
-# Docker image registry (PM3: Runtime Flag + Docker Backend)
-# ---------------------------------------------------------------------------
-# Maps sim/VLA names to their Docker image tags.
-# Images are defined in docker/*.Dockerfile (PM2).
-DOCKER_IMAGES: Dict[str, str] = {
-    "libero": "robo-eval/sim-libero:latest",
-    "libero_pro": "robo-eval/sim-libero:latest",  # same image, different --sim flag
-    "libero_infinity": "robo-eval/sim-libero:latest",
-    "robocasa": "robo-eval/sim-robocasa:latest",
-    "robotwin": "robo-eval/sim-robotwin:latest",
-}
-
-VLA_DOCKER_IMAGES: Dict[str, str] = {
-    "pi05": "robo-eval/vla-lerobot:latest",
-    "smolvla": "robo-eval/vla-lerobot:latest",
-    "openvla": "robo-eval/vla-openvla:latest",
-    "cosmos": "robo-eval/vla-cosmos:latest",
-    "internvla": "robo-eval/vla-internvla:latest",
-    "groot": "robo-eval/vla-groot:latest",
-}
-
-PROXY_DOCKER_IMAGE = "robo-eval/proxy:latest"
-
 # Native eval configs (for --mode native)
 NATIVE_EVAL_CONFIGS: Dict[str, Dict] = {
     "pi05": {
@@ -675,6 +674,8 @@ NATIVE_EVAL_CONFIGS: Dict[str, Dict] = {
 RAM_COSTS_GB: Dict[str, float] = {
     # VLA model servers (GPU/unified memory)
     "pi05": 15.0,       # ~15 GB for pi05_libero_finetuned
+    "vqbet": 1.0,       # ~1 GB for lerobot/vqbet_pusht (small VQ-VAE + transformer head)
+    "tdmpc2": 2.0,      # ~2 GB for tdmpc2 metaworld MT80 (small world-model + Q-fn)
     "openvla": 15.0,    # ~15 GB for openvla-7b
     "smolvla": 3.0,     # ~3 GB for smolvla (0.45B params)
     "cosmos": 5.0,      # ~5 GB for Cosmos-Policy-RoboCasa-Predict2-2B

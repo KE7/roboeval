@@ -1,10 +1,9 @@
 """
 Experience I/O Utilities.
 
-Provides save/load helpers for the various experience directory formats used
-by the CLI commands (planner, ablation-nor, ablation-who, positive-icl,
-reflexion-like).  Each "experience directory" is a flat folder containing a
-subset of: image0.png, image1.png, task.txt, success.txt, whathappened.txt,
+Provides save/load helpers for the experience directory formats used by the
+CLI commands. Each "experience directory" is a flat folder containing a subset
+of: image0.png, image1.png, task.txt, success.txt, whathappened.txt,
 reasoning.txt, assessment.txt, reflection.txt.
 
 The low-level helpers ``_save_experience_dir`` and ``_load_experience_dir``
@@ -132,7 +131,7 @@ def save_who_ablation_dir(parent_dir, image0, task, success, whathappened):
 
 
 def save_reflexion_dir(parent_dir, image0, task, reflection):
-    """Save a reflexion-style experience directory (image, task, reflection)."""
+    """Save an experience directory with image, task, and reflection text."""
     return _save_experience_dir(
         parent_dir, image0=image0, task=task, reflection=reflection,
     )
@@ -200,7 +199,7 @@ def load_who_ablation_dir(dir_path):
 
 
 def load_reflexion_dir(dir_path):
-    """Load a reflexion-style experience directory.
+    """Load an experience directory with image, task, and reflection text.
 
     Returns:
         Tuple of ``(image0, task, reflection)``.

@@ -82,8 +82,7 @@ def save_video(frames, videoname):
 def collect_all_frames(world) -> list:
     """Collect all frames from a world's subtask_frame_tuples into a flat list.
 
-    This avoids the common bug of reusing the loop variable name for both the
-    accumulator and the unpacked tuple element (``for _, frames in ...: frames += frames``).
+    Keeps the frame accumulator separate from each subtask's frame list.
     """
     all_frames = []
     for _subtask_cmd, subtask_frames in world.subtask_frame_tuples:
@@ -316,12 +315,11 @@ def planner(
             # Save image0.png (initial), image1.png (final)
             success, whathappened, reasoning = get_reasoning_steps(
                 init_img, final_img, task
-            )  # video_frames=frames # Note: you can use the video here if you want. But ymmv.
+            )  # Pass video_frames=frames to critique using the full subtask video.
             subtask_icadirpath = save_reasoning_ica_dir(
                 unique_dir_pathname, init_img, task, success, whathappened, reasoning
             )
             subtask_reasoning_tuples.append((task, success, whathappened, reasoning))
-            # Optionally, generate scene descriptions using ReasoningICADir methods
         print("Creating reasoning tuple for overall task.")
         assessment = get_top_level_task_assessment(
             initial_image,
@@ -423,7 +421,6 @@ def ablation_nor(
             os.makedirs(unique_dir_pathname, exist_ok=True)
             save_ablation_dir(unique_dir_pathname, init_img, task, outcome)
             image_task_succ_tuples.append((init_img, task, outcome))
-            # Optionally, generate scene descriptions using ReasoningICADir methods
         if ask_save_video:
             prompt_video_save(collect_all_frames(world))
 
@@ -510,7 +507,6 @@ def ablation_who(
                 unique_dir_pathname, init_img, task, outcome, whathappened
             )
             image_task_succ_wh_tuples.append((init_img, task, outcome, whathappened))
-            # Optionally, generate scene descriptions using ReasoningICADir methods
         if ask_save_video:
             prompt_video_save(collect_all_frames(world))
 
@@ -596,7 +592,6 @@ def positive_icl(
                 os.makedirs(unique_dir_pathname, exist_ok=True)
                 save_icl_dir(unique_dir_pathname, init_img, task)
                 image_task_tuples.append((init_img, task))
-            # Optionally, generate scene descriptions using ReasoningICADir methods
         if ask_save_video:
             prompt_video_save(collect_all_frames(world))
 

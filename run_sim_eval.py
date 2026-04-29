@@ -6,7 +6,7 @@ Runs the LITEN iterative reasoning/assessment loop against a robotic simulator
 litellm VLM proxy.
 
 Prerequisites:
-    1. Start the simulator server: ``bash scripts/start_sim.sh --sim libero --port 5001``
+    1. Start the simulator server: ``robo-eval serve --sim libero --sim-port 5001``
     2. Start the litellm proxy:    ``bash scripts/start_vlm.sh``
     3. Start a VLA policy server:  ``bash scripts/start_pi05_policy.sh``
 
@@ -25,9 +25,7 @@ from pathlib import Path
 import typer
 from PIL import Image
 
-import vlm_hl.vlm_methods as vlmi
 from robo_eval.episode_logger import EpisodeResult, save_episode_result
-from vlm_hl.vlm_methods import LLMStats
 from ica.reasoning_ica import TaskICADir
 from run import (
     get_reasoning_steps,
@@ -37,6 +35,15 @@ from run import (
 from run_utils import save_reasoning_ica_dir, save_top_level_ica_dir
 from sims.env_wrapper import SimWrapper, VALID_SIMS
 from sims.litellm_vlm import setup_litellm_from_endpoint
+
+# vlm_hl.vlm_methods is imported lazily inside eval_sim() so that --no-vlm
+# runs work without litellm installed at module load time.
+
+
+class _LLMStatsStub:
+    """Minimal stand-in for LLMStats used in --no-vlm mode."""
+    def __str__(self) -> str:
+        return "LLMStats(vlm_disabled)"
 
 app = typer.Typer(
     help="LITEN Simulator Evaluation: Run LITEN against robotic simulators."
@@ -165,12 +172,47 @@ def eval_sim(
         None, "--seed",
         help="Random seed for reproducibility.",
     ),
+    episode: int = typer.Option(
+        None, "--episode",
+        help=(
+            "Run only this specific episode index (0-based). "
+            "Overrides --start-episode and forces --max-episodes 1. "
+            "Used by robo-eval sharded mode to target individual episodes."
+        ),
+    ),
     sim_config: str = typer.Option(
         None, "--sim-config",
         help="Optional path to a YAML file with extra sim configuration (passed to sim_worker).",
     ),
+    # ------------------------------------------------------------------ #
+    # Action Chunking                                                      #
+    # ------------------------------------------------------------------ #
+    chunk_size: int = typer.Option(
+        None, "--chunk-size",
+        help=(
+            "Max actions to execute per VLA inference call (effective chunk size). "
+            "Default: use the model's action_chunk_size from /info."
+        ),
+    ),
+    action_ensemble: str = typer.Option(
+        "newest", "--action-ensemble",
+        help=(
+            "Blending strategy for overlapping action chunks when the buffer is "
+            "refilled before draining: 'newest' (default, new chunk replaces remaining), "
+            "'average' (element-wise mean), or 'ema' (alpha*new + (1-alpha)*old)."
+        ),
+    ),
+    ema_alpha: float = typer.Option(
+        0.5, "--ema-alpha",
+        help="EMA blend coefficient when --action-ensemble=ema (default 0.5).",
+    ),
 ):
     """Run LITEN evaluation on a simulator environment."""
+    # --episode overrides start_episode / max_episodes for single-episode sharded runs
+    if episode is not None:
+        start_episode = episode
+        max_episodes = 1
+
     # Set random seeds for reproducibility
     import random as _random
     if seed is not None:
@@ -195,7 +237,7 @@ def eval_sim(
         typer.echo(f"Error: --sim must be one of {VALID_SIMS}")
         raise typer.Exit(1)
 
-    # Load sim config YAML if provided
+    # Load optional simulator configuration.
     import yaml
     if sim_config:
         try:
@@ -210,8 +252,7 @@ def eval_sim(
     else:
         sim_config_dict = {}
 
-    # Forward the run-level seed into sim_config_dict so that backends
-    # such as LiberoInfinityBackend use the actual run seed (not a hardcoded default).
+    # Forward the run-level seed into simulator configuration.
     sim_config_dict["seed"] = seed
 
     # Patch VLM to use litellm proxy (skip in no-vlm mode)
@@ -259,6 +300,9 @@ def eval_sim(
                 delta_actions=delta_actions,
                 no_vlm=no_vlm,
                 sim_config=sim_config_dict,
+                chunk_size=chunk_size,
+                action_ensemble=action_ensemble,
+                ema_alpha=ema_alpha,
             )
         except Exception as e:
             typer.echo(f"Failed to initialize simulator (skipping episode): {e}")
@@ -273,28 +317,37 @@ def eval_sim(
             typer.echo(f"Resetting simulator to episode {episode} init state...")
             wrapper.physical_reset(episode_index=episode)
 
-            llm_stats = LLMStats()
-
             # Get initial observation
             initial_image = wrapper.current_image.copy()
             instruction = wrapper.task_instruction
 
             typer.echo(f"Task instruction: {instruction}")
 
-            typer.echo("Generating LITEN plan program...")
-            new_programplan, justification = vlmi.generate_planner_program(
-                initial_image,
-                instruction,
-                object_uids=getattr(wrapper, "manipulable_object_uids", []),
-                tuple_icadirs=task_icadirs,
-                llm_stats=llm_stats,
-                no_think=no_think,
-                no_vlm=no_vlm,
-            )
-            typer.echo("Generated program:")
-            typer.echo(new_programplan)
-            typer.echo(f"Justification: {justification}")
-            typer.echo(str(llm_stats))
+            if not no_vlm:
+                # Lazy import — requires litellm; skipped in --no-vlm mode.
+                import vlm_hl.vlm_methods as vlmi
+                from vlm_hl.vlm_methods import LLMStats
+                llm_stats = LLMStats()
+                typer.echo("Generating LITEN plan program...")
+                new_programplan, justification = vlmi.generate_planner_program(
+                    initial_image,
+                    instruction,
+                    object_uids=getattr(wrapper, "manipulable_object_uids", []),
+                    tuple_icadirs=task_icadirs,
+                    llm_stats=llm_stats,
+                    no_think=no_think,
+                    no_vlm=no_vlm,
+                )
+                typer.echo("Generated program:")
+                typer.echo(new_programplan)
+                typer.echo(f"Justification: {justification}")
+                typer.echo(str(llm_stats))
+            else:
+                # --no-vlm: execute the task instruction directly, no VLM call.
+                llm_stats = _LLMStatsStub()
+                new_programplan = f"world.act({instruction!r})"
+                justification = "no-vlm mode: direct instruction"
+                typer.echo(f"--no-vlm: executing direct program: {new_programplan}")
 
             # Execute the plan
             typer.echo("Executing generated program...")
@@ -328,6 +381,8 @@ def eval_sim(
                 ep_results_dir = str(
                     Path(experience_dir).parent.parent
                 )
+            # Always print steps to stdout so the orchestrator can parse it even when suite="".
+            typer.echo(f"  steps={total_steps}")
             if suite:
                 ep_json_path = save_episode_result(
                     ep_results_dir, suite, int(task) if str(task).isdigit() else 0, episode, ep_result,
@@ -394,7 +449,7 @@ def eval_sim(
                 )
                 task_icadirs.append(TaskICADir(episode_dir))
 
-            # Save video (legacy demo_videos/ path)
+            # Save rollout video through the shared helper.
             if save_videos:
                 all_frames = []
                 for _, frames in wrapper.subtask_frame_tuples:

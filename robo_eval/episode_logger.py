@@ -1,13 +1,4 @@
-"""
-Structured JSON episode result logging.
-
-Writes per-episode results as individual JSON files for reliable,
-structured data collection. This replaces fragile regex parsing of
-log files with first-class structured output.
-
-Standalone module using only stdlib (json, os, datetime, dataclasses)
-so it can be imported from any Python 3.8+ venv.
-"""
+"""Structured JSON episode result logging."""
 
 from __future__ import annotations
 

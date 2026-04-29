@@ -1,9 +1,9 @@
 """
-World Stubs for Plan Execution.
+World interfaces for plan execution.
 
-This module defines ``BaseWorldStub``, the abstract base class for all robo-eval
-execution environments. Subclasses implement ``act()`` and ``physical_reset()``
-for their specific hardware (simulators, real robots, etc.).
+This module defines ``BaseWorldStub``, the abstract base class for execution
+environments. Subclasses implement ``act()`` and ``physical_reset()`` for their
+target environment.
 """
 
 from typing import List, Optional
@@ -14,13 +14,13 @@ import vlm_hl.vlm_methods as vlmi
 
 
 class BaseWorldStub:
-    """Abstract base class for all robo-eval world execution environments.
+    """Abstract base class for world execution environments.
 
     Manages scene images, manipulable object tracking, subtask frame recording,
     and VLM-based reasoning (true/false, multiple choice, open questions).
 
     Subclasses must implement:
-      - ``act(command)`` — execute a subtask via the VLA
+      - ``act(command)`` — execute a subtask command
       - ``physical_reset()`` — reset the physical environment
 
     Attributes:
@@ -107,10 +107,10 @@ class BaseWorldStub:
         return self.ask_mc(question, options)
 
     def act(self, command: str):
-        """Execute a subtask command via the VLA.
+        """Execute a subtask command through the configured controller.
 
         Must be implemented by subclasses. Should:
-          1. Query the VLA for actions and execute them.
+          1. Generate actions and execute them.
           2. Append ``(command, frames)`` to ``self.subtask_frame_tuples``.
           3. Update ``self.current_image`` to the final observation.
 
