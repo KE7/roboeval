@@ -53,12 +53,15 @@ def _make_sim_info(
     state_dim=8,
     cameras=None,
     accepted_dims=None,
+    image_transform="applied_in_sim",
 ):
     """Build a mock sim /info response.
 
     Args:
         accepted_dims: If provided, added to action_space dict.  None means
             the field is omitted (tests the fallback-to-strict-identity path).
+        image_transform: Value for obs_space.image_transform.  Defaults to
+            "applied_in_sim", meaning the sim applies the LIBERO flip.
     """
     cam_list = []
     for role in (cameras or ["primary"]):
@@ -74,6 +77,7 @@ def _make_sim_info(
         "obs_space": {
             "cameras": cam_list,
             "state": {"dim": state_dim, "format": "test"},
+            "image_transform": image_transform,
         },
     }
 
@@ -298,12 +302,28 @@ class TestImageTransform:
         restored = _apply_image_transform(flipped, "flip_hw")
         np.testing.assert_array_equal(np.array(restored), original)
 
-    def test_image_transform_applied_during_negotiation(self, monkeypatch):
-        """VLA declaring 'flip_hw' → wrapper stores the transform."""
-        vla = _make_vla_info(image_transform="flip_hw")
-        sim = _make_sim_info()
+    def test_image_transform_applied_in_sim_stored(self, monkeypatch):
+        """VLA declaring 'applied_in_sim' → wrapper stores 'applied_in_sim' (no double flip)."""
+        vla = _make_vla_info(image_transform="applied_in_sim")
+        sim = _make_sim_info()  # sim default: applied_in_sim
         w = _make_wrapper(vla, sim, monkeypatch)
-        assert w._image_transform == "flip_hw"
+        assert w._image_transform == "applied_in_sim"
+
+    def test_image_transform_flip_hw_raises_when_sim_applied_in_sim(self, monkeypatch):
+        """VLA 'flip_hw' + sim 'applied_in_sim' → SpecMismatchError (double flip)."""
+        from sims.env_wrapper import SpecMismatchError
+        vla = _make_vla_info(image_transform="flip_hw")
+        sim = _make_sim_info()  # sim default: applied_in_sim
+        with pytest.raises(SpecMismatchError, match="double flip"):
+            _make_wrapper(vla, sim, monkeypatch)
+
+    def test_image_transform_flip_hw_raises_when_sim_none(self, monkeypatch):
+        """VLA 'flip_hw' + sim 'none' → SpecMismatchError."""
+        from sims.env_wrapper import SpecMismatchError
+        vla = _make_vla_info(image_transform="flip_hw")
+        sim = _make_sim_info(image_transform="none")
+        with pytest.raises(SpecMismatchError, match="image_transform conflict"):
+            _make_wrapper(vla, sim, monkeypatch)
 
 
 # ======================================================================
@@ -316,13 +336,18 @@ class TestCompatibilityMatrix:
 
     @staticmethod
     def _pi05_info():
-        """pi0.5 /info: eef_delta/7, state_dim=8, cameras=[primary, wrist]."""
+        """pi0.5 /info: eef_delta/7, state_dim=8, cameras=[primary, wrist].
+
+        Pi 0.5 advertises image_transform='applied_in_sim': the sim applies the
+        LIBERO 180° flip, and the VLA server does not request an additional flip
+        from env_wrapper.
+        """
         return _make_vla_info(
             action_type="eef_delta",
             action_dim=7,
             state_dim=8,
             cameras=["primary", "wrist"],
-            image_transform="flip_hw",
+            image_transform="applied_in_sim",
         )
 
     @staticmethod
@@ -339,8 +364,8 @@ class TestCompatibilityMatrix:
     def _robocasa_info():
         """RoboCasa sim /info (PandaOmron default): eef_delta/12, two cameras, state_dim=9.
 
-        Reports accepted_dims=[7,12] to mirror the real RoboCasaBackend
-        which pads 7-dim actions to 12-dim internally.
+        Reports accepted_dims=[7,12] for a backend that pads 7-dim actions to
+        12-dim internally.
         """
         return _make_sim_info(
             action_type="eef_delta",
@@ -352,7 +377,7 @@ class TestCompatibilityMatrix:
 
     @staticmethod
     def _internvla_info():
-        """Hypothetical InternVLA: joint_pos/14, state_dim=14."""
+        """Joint-position VLA: joint_pos/14, state_dim=14."""
         return _make_vla_info(
             action_type="joint_pos",
             action_dim=14,
@@ -374,13 +399,14 @@ class TestCompatibilityMatrix:
         """pi0.5 (eef_delta/7) + LIBERO (eef_delta/7) → OK."""
         w = _make_wrapper(self._pi05_info(), self._libero_info(), monkeypatch)
         assert w.action_dim == 7
-        assert w._image_transform == "flip_hw"
+        # Both sides say applied_in_sim; wrapper stores that value.
+        assert w._image_transform == "applied_in_sim"
 
     def test_pi05_robocasa_compatible_via_accepted_dims(self, monkeypatch):
         """Cosmos-like VLA (dim=7) + RoboCasa PandaOmron (accepted_dims=[7,12]) → OK.
 
-        With Option B (accepted_dims), the sim advertises that it can
-        accept 7-dim actions (arm-only, padded to 12 internally).
+        With accepted_dims, the sim advertises that it can accept 7-dim actions
+        (arm-only, padded to 12 internally).
         Uses state_dim=9 to match RoboCasa's obs space (pi0.5 uses 8).
         """
         # Use a Cosmos-like VLA that matches RoboCasa's state_dim=9
@@ -393,14 +419,14 @@ class TestCompatibilityMatrix:
         assert w._sim_action_space["accepted_dims"] == [7, 12]
 
     def test_internvla_robotwin_compatible(self, monkeypatch):
-        """InternVLA (joint_pos/14) + RoboTwin (joint_pos/14) → OK."""
+        """Joint-position VLA + RoboTwin (joint_pos/14) → OK."""
         w = _make_wrapper(
             self._internvla_info(), self._robotwin_info(), monkeypatch
         )
         assert w.action_dim == 14
 
     def test_internvla_libero_incompatible(self, monkeypatch):
-        """InternVLA (joint_pos/14) + LIBERO (eef_delta/7) → ValueError."""
+        """Joint-position VLA + LIBERO (eef_delta/7) → ValueError."""
         with pytest.raises(ValueError, match="type mismatch"):
             _make_wrapper(
                 self._internvla_info(), self._libero_info(), monkeypatch
@@ -413,7 +439,7 @@ class TestCompatibilityMatrix:
 
 
 class TestAcceptedDims:
-    """Verify accepted_dims negotiation (Option B)."""
+    """Verify accepted_dims negotiation."""
 
     def test_accepted_dims_match(self, monkeypatch):
         """VLA dim=7, sim accepted_dims=[7,12] → OK."""

@@ -342,7 +342,7 @@ class TestVLAConfig:
 
     def test_known_vla_names(self):
         from robo_eval.config import VLA_CONFIGS
-        assert set(VLA_CONFIGS.keys()) == {"pi05", "openvla", "smolvla", "cosmos", "internvla", "groot"}
+        assert set(VLA_CONFIGS.keys()) == {"pi05", "vqbet", "tdmpc2", "openvla", "smolvla", "cosmos", "internvla", "groot"}
 
     def test_startup_timeout(self):
         from robo_eval.config import VLA_CONFIGS

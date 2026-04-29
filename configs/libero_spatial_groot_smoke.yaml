@@ -27,7 +27,7 @@ sim: libero
 sim_url: http://localhost:5300
 suite: libero_spatial
 
-episodes_per_task: 1
+episodes_per_task: 10
 max_tasks: 1
 
 # LIBERO consumes 7-dim EEF delta (Δxyz + Δaxisangle + gripper).

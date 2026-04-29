@@ -24,7 +24,7 @@ suite: robotwin
 task: "0"
 
 # Episodes
-episodes_per_task: 1
+episodes_per_task: 10
 max_tasks: 1
 
 # RoboTwin consumes ABSOLUTE 14-dim joint targets, NOT delta EEF.
