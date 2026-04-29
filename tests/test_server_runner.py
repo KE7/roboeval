@@ -1,23 +1,21 @@
-"""Regression tests for robo_eval.server_runner.
+"""Regression tests for roboeval.server_runner.
 
 Focus areas:
   - _poll_health readiness handling
   - install_signal_handlers: ensure importing the module is side-effect free
 """
+
 from __future__ import annotations
 
 import signal
-import time
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from unittest.mock import patch
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers: tiny in-process HTTP server
 # ---------------------------------------------------------------------------
+
 
 def _make_handler(response_body: bytes, content_type: str = "application/json"):
     class Handler(BaseHTTPRequestHandler):
@@ -45,12 +43,13 @@ def _start_server(handler, host="127.0.0.1"):
 # Test: import is side-effect free
 # ---------------------------------------------------------------------------
 
+
 def test_import_does_not_install_signal_handlers():
     """Importing server_runner must NOT change SIGINT/SIGTERM handlers."""
     original_sigint = signal.getsignal(signal.SIGINT)
     original_sigterm = signal.getsignal(signal.SIGTERM)
 
-    import robo_eval.server_runner  # noqa: F401 (side-effect free import check)
+    import roboeval.server_runner  # side-effect free import check
 
     assert signal.getsignal(signal.SIGINT) is original_sigint, (
         "Importing server_runner changed the SIGINT handler — "
@@ -66,9 +65,10 @@ def test_import_does_not_install_signal_handlers():
 # Test: _poll_health with {"ready": true}
 # ---------------------------------------------------------------------------
 
+
 def test_poll_health_ready_true():
     """_poll_health returns True when the server replies {"ready": true}."""
-    from robo_eval.server_runner import _poll_health
+    from roboeval.server_runner import _poll_health
 
     handler = _make_handler(b'{"ready": true}')
     server, port = _start_server(handler)
@@ -87,7 +87,7 @@ def test_poll_health_status_ok():
 
     Covers fallback readiness behavior for servers that expose status but not ready.
     """
-    from robo_eval.server_runner import _poll_health
+    from roboeval.server_runner import _poll_health
 
     handler = _make_handler(b'{"status": "ok"}')
     server, port = _start_server(handler)
@@ -103,7 +103,7 @@ def test_poll_health_status_ok():
 
 def test_poll_health_ready_false_does_not_return_early():
     """_poll_health keeps polling when the server replies {"ready": false}."""
-    from robo_eval.server_runner import _poll_health
+    from roboeval.server_runner import _poll_health
 
     # Server always returns {"ready": false}; poll should time out and return (False, "timeout").
     handler = _make_handler(b'{"ready": false}')
@@ -123,7 +123,7 @@ def test_poll_health_ready_false_does_not_return_early():
 
 def test_poll_health_unreachable_server():
     """_poll_health returns (False, ...) when no server is listening on the given port."""
-    from robo_eval.server_runner import _poll_health
+    from roboeval.server_runner import _poll_health
 
     # Port 1 is typically unreachable (privileged) or closed.
     # Use a high-numbered port that is almost certainly unbound.
@@ -137,7 +137,7 @@ def test_poll_health_no_ready_no_status():
 
     {"some_key": "some_value"} has neither 'ready' nor 'status=="ok"'.
     """
-    from robo_eval.server_runner import _poll_health
+    from roboeval.server_runner import _poll_health
 
     handler = _make_handler(b'{"some_key": "some_value"}')
     server, port = _start_server(handler)
@@ -155,9 +155,10 @@ def test_poll_health_no_ready_no_status():
 # Test: install_signal_handlers
 # ---------------------------------------------------------------------------
 
+
 def test_install_signal_handlers_replaces_sigint():
     """install_signal_handlers() should change the SIGINT handler."""
-    from robo_eval.server_runner import install_signal_handlers, _signal_handler
+    from roboeval.server_runner import _signal_handler, install_signal_handlers
 
     original = signal.getsignal(signal.SIGINT)
     try:

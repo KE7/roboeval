@@ -32,6 +32,7 @@ Environment variables:
 Usage:
     python -m sims.vla_policies.internvla_policy [--port PORT] [--model MODEL]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,6 +47,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+
 from sims.vla_policies.base import VLAPolicyBase, make_app
 from sims.vla_policies.vla_schema import VLAObservation
 
@@ -55,27 +57,28 @@ if _INTERNVLA_SRC.exists() and str(_INTERNVLA_SRC) not in sys.path:
     sys.path.insert(0, str(_INTERNVLA_SRC))
 
 try:
-    from robo_eval.specs import ActionObsSpec
+    from roboeval.specs import ActionObsSpec
+
     # InternVLA-A1-3B-RoboTwin: 14-dim ALOHA absolute joint positions
     # 7 left arm joints (incl. gripper at idx 6) + 7 right arm joints (incl. gripper at idx 13)
-    _JOINT_POS_14   = ActionObsSpec("joint_pos", 14, "absolute_joint_positions", None)
-    _IMAGE_RGB      = ActionObsSpec("image",      0, "rgb_hwc_uint8")
-    _LANGUAGE       = ActionObsSpec("language",   0, "language")
-    _STATE_JOINTS14 = ActionObsSpec("state",      14, "joint_positions", None)
+    _JOINT_POS_14 = ActionObsSpec("joint_pos", 14, "absolute_joint_positions", None)
+    _IMAGE_RGB = ActionObsSpec("image", 0, "rgb_hwc_uint8")
+    _LANGUAGE = ActionObsSpec("language", 0, "language")
+    _STATE_JOINTS14 = ActionObsSpec("state", 14, "joint_positions", None)
     _HAS_SPECS = True
 except ImportError:
     _HAS_SPECS = False
 
 logger = logging.getLogger(__name__)
 
-_MODEL_ID      = "InternRobotics/InternVLA-A1-3B-RoboTwin"
-_STATS_KEY     = "aloha"
-_RESIZE        = 224
-_INFER_HORIZON = 30   # first 30 of n_action_steps chunk returned as actions
-_ACTION_DIM    = 14   # ALOHA: 7 left + 7 right joint positions
-_LEFT_GRIP     = 6    # gripper dim in the left-arm half
-_RIGHT_GRIP    = 13   # gripper dim in the full 14-dim vector
-_IMG_HIST_LEN  = 16   # temporal deque capacity (interval=15 steps)
+_MODEL_ID = "InternRobotics/InternVLA-A1-3B-RoboTwin"
+_STATS_KEY = "aloha"
+_RESIZE = 224
+_INFER_HORIZON = 30  # first 30 of n_action_steps chunk returned as actions
+_ACTION_DIM = 14  # ALOHA: 7 left + 7 right joint positions
+_LEFT_GRIP = 6  # gripper dim in the left-arm half
+_RIGHT_GRIP = 13  # gripper dim in the full 14-dim vector
+_IMG_HIST_LEN = 16  # temporal deque capacity (interval=15 steps)
 
 
 class InternVLAPolicy(VLAPolicyBase):
@@ -94,9 +97,12 @@ class InternVLAPolicy(VLAPolicyBase):
         float16  → ~6 GB weights; local debugging only.
         """
         _MAP = {
-            "fp32": torch.float32,  "float32":  torch.float32,
-            "bf16": torch.bfloat16, "bfloat16": torch.bfloat16,
-            "fp16": torch.float16,  "float16":  torch.float16,
+            "fp32": torch.float32,
+            "float32": torch.float32,
+            "bf16": torch.bfloat16,
+            "bfloat16": torch.bfloat16,
+            "fp16": torch.float16,
+            "float16": torch.float16,
         }
         raw = os.environ.get("INTERNVLA_DTYPE", "fp32").lower().strip()
         dtype = _MAP.get(raw)
@@ -107,30 +113,36 @@ class InternVLAPolicy(VLAPolicyBase):
             logger.warning(
                 "INTERNVLA_DTYPE=%s requested. bf16/fp16 corrupt InternVLA-A1's "
                 "flow-matching denoise loop and produce ~0%% task success. "
-                "Use only for memory-constrained debugging.", raw,
+                "Use only for memory-constrained debugging.",
+                raw,
             )
         return dtype
 
     def __init__(self) -> None:
         super().__init__()
-        self._dtype  = self._resolve_dtype()  # default: float32 (~12 GB)
+        self._dtype = self._resolve_dtype()  # default: float32 (~12 GB)
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
-        self._head_hist:  collections.deque = collections.deque(maxlen=_IMG_HIST_LEN)
-        self._left_hist:  collections.deque = collections.deque(maxlen=_IMG_HIST_LEN)
+        self._head_hist: collections.deque = collections.deque(maxlen=_IMG_HIST_LEN)
+        self._left_hist: collections.deque = collections.deque(maxlen=_IMG_HIST_LEN)
         self._right_hist: collections.deque = collections.deque(maxlen=_IMG_HIST_LEN)
 
     def load_model(self, model_id: str, device: str, **_) -> None:
         from huggingface_hub import snapshot_download
         from lerobot.configs.policies import PreTrainedConfig
         from lerobot.policies.InternVLA_A1_3B.modeling_internvla_a1 import QwenA1Policy
-        from lerobot.policies.InternVLA_A1_3B.transform_internvla_a1 import Qwen3_VLProcessorTransformFn
+        from lerobot.policies.InternVLA_A1_3B.transform_internvla_a1 import (
+            Qwen3_VLProcessorTransformFn,
+        )
         from lerobot.transforms.core import (
-            NormalizeTransformFn, UnNormalizeTransformFn,
-            ResizeImagesWithPadFn, RemapImageKeyTransformFn, compose,
+            NormalizeTransformFn,
+            RemapImageKeyTransformFn,
+            ResizeImagesWithPadFn,
+            UnNormalizeTransformFn,
+            compose,
         )
 
         self.model_id = model_id
-        self._device  = device
+        self._device = device
         logger.info("Loading InternVLA-A1-3B on device=%s ...", device)
 
         try:
@@ -148,25 +160,32 @@ class InternVLAPolicy(VLAPolicyBase):
         with open(stats_path) as f:
             stats = json.load(f)[_STATS_KEY]
         sk = ["min", "max", "mean", "std"]
-        action_stat = {"action":              {k: np.asarray(stats["action"][k])              for k in sk}}
-        state_stat  = {"observation.state":   {k: np.asarray(stats["observation.state"][k])  for k in sk}}
+        action_stat = {"action": {k: np.asarray(stats["action"][k]) for k in sk}}
+        state_stat = {
+            "observation.state": {k: np.asarray(stats["observation.state"][k]) for k in sk}
+        }
 
         self._unnorm_fn = UnNormalizeTransformFn(
             selected_keys=["action"], mode="mean_std", norm_stats=action_stat
         )
         image_keys = [f"observation.images.image{i}" for i in range(3)]
-        self._input_xfm = compose([
-            ResizeImagesWithPadFn(height=_RESIZE, width=_RESIZE),
-            RemapImageKeyTransformFn(mapping={k: k for k in image_keys}),
-            Qwen3_VLProcessorTransformFn(),
-            NormalizeTransformFn(
-                selected_keys=["observation.state"], mode="mean_std", norm_stats=state_stat
-            ),
-        ])
+        self._input_xfm = compose(
+            [
+                ResizeImagesWithPadFn(height=_RESIZE, width=_RESIZE),
+                RemapImageKeyTransformFn(mapping={k: k for k in image_keys}),
+                Qwen3_VLProcessorTransformFn(),
+                NormalizeTransformFn(
+                    selected_keys=["observation.state"], mode="mean_std", norm_stats=state_stat
+                ),
+            ]
+        )
         self.ready = True
         logger.info(
             "InternVLA ready: device=%s, dtype=%s, n_action_steps=%d, infer_horizon=%d",
-            device, self._dtype, self._n_action_steps, _INFER_HORIZON,
+            device,
+            self._dtype,
+            self._n_action_steps,
+            _INFER_HORIZON,
         )
 
     def predict(self, obs: VLAObservation) -> list[list[float]]:
@@ -182,18 +201,18 @@ class InternVLAPolicy(VLAPolicyBase):
             return torch.stack([past, cur], dim=0)  # [2, H, W, C]
 
         imgs = obs.images
-        head_b64  = imgs.get("primary")   or imgs.get("head_camera")
-        left_b64  = imgs.get("wrist")     or imgs.get("left_camera")
+        head_b64 = imgs.get("primary") or imgs.get("head_camera")
+        left_b64 = imgs.get("wrist") or imgs.get("left_camera")
         right_b64 = imgs.get("secondary") or imgs.get("right_camera")
         if head_b64 is None:
             raise ValueError("No primary/head_camera image in request")
-        head_t  = b64_to_tensor(head_b64)
-        left_t  = b64_to_tensor(left_b64)  if left_b64  else head_t
+        head_t = b64_to_tensor(head_b64)
+        left_t = b64_to_tensor(left_b64) if left_b64 else head_t
         right_t = b64_to_tensor(right_b64) if right_b64 else head_t
 
         # Build [2,C,H,W] temporal pairs, then update history
-        image0 = temporal_pair(self._head_hist,  head_t).permute(0, 3, 1, 2)
-        image1 = temporal_pair(self._left_hist,  left_t).permute(0, 3, 1, 2)
+        image0 = temporal_pair(self._head_hist, head_t).permute(0, 3, 1, 2)
+        image1 = temporal_pair(self._left_hist, left_t).permute(0, 3, 1, 2)
         image2 = temporal_pair(self._right_hist, right_t).permute(0, 3, 1, 2)
         self._head_hist.append(head_t)
         self._left_hist.append(left_t)
@@ -245,46 +264,46 @@ class InternVLAPolicy(VLAPolicyBase):
         action_pred = action_pred + init[None]
 
         # Binarise gripper dimensions
-        action_pred[:, _LEFT_GRIP]  = (action_pred[:, _LEFT_GRIP]  >= 0.5).float()
+        action_pred[:, _LEFT_GRIP] = (action_pred[:, _LEFT_GRIP] >= 0.5).float()
         action_pred[:, _RIGHT_GRIP] = (action_pred[:, _RIGHT_GRIP] >= 0.5).float()
 
         return action_pred.cpu().numpy().tolist()
 
     def get_info(self) -> dict:
         return {
-            "model":    _MODEL_ID,
+            "model": _MODEL_ID,
             "model_id": _MODEL_ID,
             "model_type": "InternVLA-A1-3B",
-            "device":   self._device,
-            "loaded":   getattr(self, "_policy", None) is not None,
+            "device": self._device,
+            "loaded": getattr(self, "_policy", None) is not None,
             "action_space": {
                 "type": "joint_pos",
-                "dim":  _ACTION_DIM,
+                "dim": _ACTION_DIM,
                 "accepted_dims": [_ACTION_DIM],
             },
-            "state_dim":         _ACTION_DIM,
+            "state_dim": _ACTION_DIM,
             "action_chunk_size": _INFER_HORIZON,
             "obs_requirements": {
-                "cameras":          ["primary"],
-                "state_dim":        _ACTION_DIM,
-                "state_format":     "flat",
-                "image_transform":  "none",
+                "cameras": ["primary"],
+                "state_dim": _ACTION_DIM,
+                "state_format": "flat",
+                "image_transform": "none",
             },
         }
 
-    def get_action_spec(self) -> "dict | None":
+    def get_action_spec(self) -> dict | None:
         """InternVLA-A1-3B-RoboTwin: 14-dim ALOHA absolute joint positions."""
         if not _HAS_SPECS:
             return None
         return {"joint_pos": _JOINT_POS_14}
 
-    def get_observation_spec(self) -> "dict | None":
+    def get_observation_spec(self) -> dict | None:
         """InternVLA-A1-3B-RoboTwin observation spec: primary RGB + 14-dim joint state."""
         if not _HAS_SPECS:
             return None
         return {
-            "primary":     _IMAGE_RGB,
-            "state":       _STATE_JOINTS14,
+            "primary": _IMAGE_RGB,
+            "state": _STATE_JOINTS14,
             "instruction": _LANGUAGE,
         }
 
@@ -299,8 +318,10 @@ def main():
     import uvicorn
 
     parser = argparse.ArgumentParser(description="InternVLA-A1 Policy Server")
-    parser.add_argument("--port",  type=int, default=int(os.environ.get("PORT", os.environ.get("VLA_PORT", 8000))))
-    parser.add_argument("--host",  default="0.0.0.0")
+    parser.add_argument(
+        "--port", type=int, default=int(os.environ.get("PORT", os.environ.get("VLA_PORT", 8000)))
+    )
+    parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--model", default=_MODEL_ID)
     args = parser.parse_args()
 
@@ -310,7 +331,9 @@ def main():
     policy = InternVLAPolicy()
     app = make_app(policy, args.model, policy._device, title="InternVLA-A1 Policy Server")
     logging.basicConfig(level=logging.INFO, format="[%(name)s] %(message)s")
-    print(f"[internvla_policy] Starting on {args.host}:{args.port} model={args.model} device={policy._device}")
+    print(
+        f"[internvla_policy] Starting on {args.host}:{args.port} model={args.model} device={policy._device}"
+    )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

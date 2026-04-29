@@ -5,8 +5,8 @@ import numpy as np
 import requests
 from PIL import Image
 
+from roboeval.world_stubs import BaseWorldStub
 from sims.env_wrapper import SimWrapper
-from world_stubs import BaseWorldStub
 
 
 def _encode_image(img: Image.Image) -> str:
@@ -79,7 +79,9 @@ def test_act_uses_reset_observation_for_first_vla_call(monkeypatch):
 
     captured = {}
 
-    def fake_get_vla_actions(image, instruction, state=None, image2=None, image3=None, state_dict=None):
+    def fake_get_vla_actions(
+        image, instruction, state=None, image2=None, image3=None, state_dict=None
+    ):
         captured["image"] = np.array(image)
         captured["instruction"] = instruction
         return [[0.0] * 7]

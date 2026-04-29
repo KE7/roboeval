@@ -678,6 +678,19 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["robo_eval", "sims"]
 
+[tool.ruff.lint.per-file-ignores]
+# Tests intentionally mutate sys.path / install stubs before importing source;
+# also assert directly without pytest-style asserts in some legacy locations.
+"tests/**/*.py" = ["E402", "F401"]
+
+# sim_worker.py and vla_policies use deferred / side-effect imports to register
+# gym envs and avoid loading heavy CUDA stacks at module import time.
+"sims/sim_worker.py" = ["F401", "PLC0415"]
+"sims/vla_policies/*.py" = ["F401", "BLE001"]
+
+# CLI module has typer's deferred imports for runtime/typing split.
+"roboeval/cli/main.py" = ["F401"]
+
 # ---------------------------------------------------------------------------
 # Pytest
 # ---------------------------------------------------------------------------

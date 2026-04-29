@@ -18,6 +18,7 @@ Usage:
 Model paths can be overridden with COSMOS_CKPT_PATH, COSMOS_CONFIG_FILE,
 COSMOS_DATASET_STATS_PATH, and COSMOS_T5_EMBEDDINGS_PATH.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,19 +27,19 @@ import logging
 import os
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Optional
 
 import numpy as np
+
 from sims.vla_policies.base import VLAPolicyBase, make_app
 from sims.vla_policies.vla_schema import VLAObservation
 
 logger = logging.getLogger(__name__)
 
-_MODEL_ID    = "nvidia/Cosmos-Policy-RoboCasa-Predict2-2B"
-_ACTION_DIM  = 7       # EEF delta: [dx,dy,dz,droll,dpitch,dyaw,gripper]
-_PROPRIO_DIM = 9       # gripper_qpos(2) + eef_pos(3) + eef_quat(4)
-_CHUNK_SIZE  = 32      # actions per diffusion generation
-_EXEC_HORIZON = 16     # actions actually executed (open-loop horizon)
+_MODEL_ID = "nvidia/Cosmos-Policy-RoboCasa-Predict2-2B"
+_ACTION_DIM = 7  # EEF delta: [dx,dy,dz,droll,dpitch,dyaw,gripper]
+_PROPRIO_DIM = 9  # gripper_qpos(2) + eef_pos(3) + eef_quat(4)
+_CHUNK_SIZE = 32  # actions per diffusion generation
+_EXEC_HORIZON = 16  # actions actually executed (open-loop horizon)
 
 _HF_SNAP = os.path.expanduser(
     "~/.cache/huggingface/hub/models--nvidia--Cosmos-Policy-RoboCasa-Predict2-2B"
@@ -49,7 +50,7 @@ _HF_SNAP = os.path.expanduser(
 _EVAL_CFG = SimpleNamespace(
     suite="robocasa",
     use_third_person_image=True,
-    num_third_person_images=2,   # primary (left) + secondary (right)
+    num_third_person_images=2,  # primary (left) + secondary (right)
     use_wrist_image=True,
     num_wrist_images=1,
     use_proprio=True,
@@ -95,9 +96,9 @@ class CosmosPolicy(VLAPolicyBase):
         self.model_id = model_id
 
         cc.NUM_ACTIONS_CHUNK = _CHUNK_SIZE
-        cc.ACTION_DIM        = _ACTION_DIM
-        cc.PROPRIO_DIM       = _PROPRIO_DIM
-        cc.ROBOT_PLATFORM    = "ROBOCASA"
+        cc.ACTION_DIM = _ACTION_DIM
+        cc.PROPRIO_DIM = _PROPRIO_DIM
+        cc.ROBOT_PLATFORM = "ROBOCASA"
 
         logger.info("Loading Cosmos-Policy checkpoint: %s", ckpt)
         self._model, _ = load_model_from_checkpoint(
@@ -115,24 +116,26 @@ class CosmosPolicy(VLAPolicyBase):
 
     def predict(self, obs: VLAObservation) -> list[list[float]]:
         import torch
-        from PIL import Image
         from cosmos_policy.experiments.robot.cosmos_utils import get_action
+        from PIL import Image
 
         def decode(b64: str) -> np.ndarray:
-            return np.array(Image.open(BytesIO(base64.b64decode(b64))).convert("RGB"), dtype=np.uint8)
+            return np.array(
+                Image.open(BytesIO(base64.b64decode(b64))).convert("RGB"), dtype=np.uint8
+            )
 
         # RoboCasa camera frames are vertically flipped for this model.
         primary = np.flipud(decode(obs.images["primary"]))
-        wrist_b64     = obs.images.get("wrist")
+        wrist_b64 = obs.images.get("wrist")
         secondary_b64 = obs.images.get("secondary")
-        wrist     = np.flipud(decode(wrist_b64))     if wrist_b64     else np.zeros_like(primary)
+        wrist = np.flipud(decode(wrist_b64)) if wrist_b64 else np.zeros_like(primary)
         secondary = np.flipud(decode(secondary_b64)) if secondary_b64 else primary.copy()
 
         obs_dict = {
-            "primary_image":   primary,
+            "primary_image": primary,
             "secondary_image": secondary,
-            "wrist_image":     wrist,
-            "proprio":         np.array(obs.state.get("flat", []), dtype=np.float64),
+            "wrist_image": wrist,
+            "proprio": np.array(obs.state.get("flat", []), dtype=np.float64),
         }
         with torch.no_grad():
             result = get_action(
@@ -152,7 +155,9 @@ class CosmosPolicy(VLAPolicyBase):
         del result
         torch.cuda.empty_cache()
 
-        actions = [a.tolist() if isinstance(a, np.ndarray) else list(a) for a in raw[:_EXEC_HORIZON]]
+        actions = [
+            a.tolist() if isinstance(a, np.ndarray) else list(a) for a in raw[:_EXEC_HORIZON]
+        ]
         while len(actions) < _EXEC_HORIZON:
             actions.append([0.0] * _ACTION_DIM)
         return actions
@@ -181,18 +186,24 @@ class CosmosPolicy(VLAPolicyBase):
 def main():
     import uvicorn
 
-    _ckpt_def   = os.environ.get("COSMOS_CKPT_PATH",           f"{_HF_SNAP}/Cosmos-Policy-RoboCasa-Predict2-2B.pt")
-    _cfg_def    = os.environ.get("COSMOS_CONFIG_FILE",          "cosmos_policy/config/config.py")
-    _stats_def  = os.environ.get("COSMOS_DATASET_STATS_PATH",  f"{_HF_SNAP}/robocasa_dataset_statistics.json")
-    _t5_def     = os.environ.get("COSMOS_T5_EMBEDDINGS_PATH",  f"{_HF_SNAP}/robocasa_t5_embeddings.pkl")
+    _ckpt_def = os.environ.get(
+        "COSMOS_CKPT_PATH", f"{_HF_SNAP}/Cosmos-Policy-RoboCasa-Predict2-2B.pt"
+    )
+    _cfg_def = os.environ.get("COSMOS_CONFIG_FILE", "cosmos_policy/config/config.py")
+    _stats_def = os.environ.get(
+        "COSMOS_DATASET_STATS_PATH", f"{_HF_SNAP}/robocasa_dataset_statistics.json"
+    )
+    _t5_def = os.environ.get("COSMOS_T5_EMBEDDINGS_PATH", f"{_HF_SNAP}/robocasa_t5_embeddings.pkl")
 
     parser = argparse.ArgumentParser(description="Cosmos-Policy Server (RoboCasa)")
-    parser.add_argument("--port",        type=int, default=int(os.environ.get("PORT", os.environ.get("VLA_PORT", 8000))))
-    parser.add_argument("--host",        default="0.0.0.0")
-    parser.add_argument("--ckpt",        default=_ckpt_def)
+    parser.add_argument(
+        "--port", type=int, default=int(os.environ.get("PORT", os.environ.get("VLA_PORT", 8000)))
+    )
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--ckpt", default=_ckpt_def)
     parser.add_argument("--config-file", dest="config_file", default=_cfg_def)
-    parser.add_argument("--stats",       default=_stats_def)
-    parser.add_argument("--t5",          default=_t5_def)
+    parser.add_argument("--stats", default=_stats_def)
+    parser.add_argument("--t5", default=_t5_def)
     args = parser.parse_args()
 
     if not (1024 <= args.port <= 65535):
@@ -200,7 +211,9 @@ def main():
 
     policy = CosmosPolicy()
     app = make_app(
-        policy, _MODEL_ID, "cuda",
+        policy,
+        _MODEL_ID,
+        "cuda",
         title="Cosmos-Policy Server",
         ckpt=args.ckpt,
         config_file=args.config_file,

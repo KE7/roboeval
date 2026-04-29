@@ -17,26 +17,30 @@ Coverage:
 
 from __future__ import annotations
 
-import importlib
 import pathlib
 import sys
 import types
 import unittest
 
-
 # ---------------------------------------------------------------------------
 # Stubs — inject fake heavy modules before importing sim_worker
 # ---------------------------------------------------------------------------
 
+
 def _stub_optional_modules() -> None:
     """Prevent ImportError for packages only present in the sim venvs."""
     to_stub = [
-        "robosuite", "robosuite.wrappers",
-        "libero", "libero.envs", "libero.envs.libero_envs",
+        "robosuite",
+        "robosuite.wrappers",
+        "libero",
+        "libero.envs",
+        "libero.envs.libero_envs",
         "libero.envs.bddl_base_domain",
-        "libero.libero", "libero.libero.benchmark",
+        "libero.libero",
+        "libero.libero.benchmark",
         "bddl",
-        "gymnasium", "gym_aloha",
+        "gymnasium",
+        "gym_aloha",
         "metaworld",
         "libero_infinity",
         "libero_infinity.task_config",
@@ -64,16 +68,16 @@ def _stub_optional_modules() -> None:
 
 _stub_optional_modules()
 
-from sims.sim_worker import (  # noqa: E402  (import after stubbing)
+from sims.sim_worker import (  # import after stubbing
     BACKENDS,
     LiberoInfinityBackend,
     SimBackendBase,
 )
 
-
 # ---------------------------------------------------------------------------
 # ABC compliance
 # ---------------------------------------------------------------------------
+
 
 class TestLiberoInfinityBackendABCCompliance(unittest.TestCase):
     """LiberoInfinityBackend must satisfy the SimBackendBase duck-type contract."""
@@ -87,8 +91,7 @@ class TestLiberoInfinityBackendABCCompliance(unittest.TestCase):
 
     def test_implements_all_abstract_methods(self):
         b = LiberoInfinityBackend()
-        for name in ("init", "reset", "step", "get_obs", "check_success",
-                     "close", "get_info"):
+        for name in ("init", "reset", "step", "get_obs", "check_success", "close", "get_info"):
             self.assertTrue(
                 callable(getattr(b, name, None)),
                 f"LiberoInfinityBackend missing method: {name}",
@@ -103,6 +106,7 @@ class TestLiberoInfinityBackendABCCompliance(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # BACKENDS registry
 # ---------------------------------------------------------------------------
+
 
 class TestLiberoInfinityBackendRegistry(unittest.TestCase):
     """BACKENDS["libero_infinity"] must point at LiberoInfinityBackend."""
@@ -119,6 +123,7 @@ class TestLiberoInfinityBackendRegistry(unittest.TestCase):
 # get_info() contract
 # ---------------------------------------------------------------------------
 
+
 class TestLiberoInfinityBackendGetInfo(unittest.TestCase):
     """get_info() must declare the 7-dim eef_delta ActionObsSpec contracts."""
 
@@ -127,8 +132,14 @@ class TestLiberoInfinityBackendGetInfo(unittest.TestCase):
         self.info = self.backend.get_info()
 
     def test_top_level_keys_present(self):
-        for key in ("action_space", "obs_space", "max_steps", "delta_actions",
-                    "action_spec", "observation_spec"):
+        for key in (
+            "action_space",
+            "obs_space",
+            "max_steps",
+            "delta_actions",
+            "action_spec",
+            "observation_spec",
+        ):
             self.assertIn(key, self.info, f"get_info() missing key: {key}")
 
     def test_action_space_is_7dim_eef_delta(self):
@@ -170,12 +181,14 @@ class TestLiberoInfinityBackendGetInfo(unittest.TestCase):
 # server_runner defaults
 # ---------------------------------------------------------------------------
 
+
 class TestServerRunnerLiberoInfinityDefaults(unittest.TestCase):
     """server_runner must map libero_infinity → port 5308 and its own venv."""
 
     def _get_runner(self):
         # Import inside the test so module-level stubs are already installed.
-        import robo_eval.server_runner as sr
+        import roboeval.server_runner as sr
+
         return sr
 
     def test_default_port_is_5308(self):
@@ -186,8 +199,7 @@ class TestServerRunnerLiberoInfinityDefaults(unittest.TestCase):
     def test_default_venv_is_libero_infinity(self):
         sr = self._get_runner()
         self.assertIn("libero_infinity", sr._SIM_DEFAULT_VENVS)
-        self.assertEqual(sr._SIM_DEFAULT_VENVS["libero_infinity"],
-                         ".venvs/libero_infinity")
+        self.assertEqual(sr._SIM_DEFAULT_VENVS["libero_infinity"], ".venvs/libero_infinity")
 
     def test_libero_infinity_in_known_sims(self):
         sr = self._get_runner()
@@ -206,6 +218,7 @@ class TestServerRunnerLiberoInfinityDefaults(unittest.TestCase):
 # pyproject.toml extra
 # ---------------------------------------------------------------------------
 
+
 class TestLiberoInfinityPyprojectExtra(unittest.TestCase):
     """pyproject.toml must declare a [libero_infinity] optional-dependencies entry."""
 
@@ -216,24 +229,28 @@ class TestLiberoInfinityPyprojectExtra(unittest.TestCase):
         cls.content = pyproject_path.read_text(encoding="utf-8")
 
     def test_libero_infinity_extra_section_present(self):
-        self.assertIn("libero_infinity", self.content,
-                      "pyproject.toml missing [libero_infinity] extra")
+        self.assertIn(
+            "libero_infinity", self.content, "pyproject.toml missing [libero_infinity] extra"
+        )
 
     def test_libero_infinity_package_listed(self):
-        self.assertIn("libero-infinity", self.content,
-                      "pyproject.toml [libero_infinity] does not list libero-infinity package")
+        self.assertIn(
+            "libero-infinity",
+            self.content,
+            "pyproject.toml [libero_infinity] does not list libero-infinity package",
+        )
 
     def test_python_311_noted_in_comment(self):
         self.assertIn("3.11", self.content)
 
     def test_scenic_dep_present(self):
-        self.assertIn("scenic", self.content,
-                      "pyproject.toml [libero_infinity] should list scenic")
+        self.assertIn("scenic", self.content, "pyproject.toml [libero_infinity] should list scenic")
 
 
 # ---------------------------------------------------------------------------
 # Smoke config
 # ---------------------------------------------------------------------------
+
 
 class TestLiberoInfinitySmokeConfig(unittest.TestCase):
     """configs/libero_infinity_pi05_smoke.yaml must exist and be valid YAML."""
@@ -245,6 +262,7 @@ class TestLiberoInfinitySmokeConfig(unittest.TestCase):
 
     def test_smoke_config_parseable(self):
         import yaml
+
         repo_root = pathlib.Path(__file__).parent.parent
         cfg = repo_root / "configs" / "libero_infinity_pi05_smoke.yaml"
         with open(cfg) as f:

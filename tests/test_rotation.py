@@ -218,7 +218,7 @@ class TestQuatAxisAngle:
 
 def _scipy_available() -> bool:
     try:
-        import scipy.spatial.transform  # noqa: F401
+        import scipy.spatial.transform
 
         return True
     except ImportError:

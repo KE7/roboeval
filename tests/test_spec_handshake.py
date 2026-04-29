@@ -14,21 +14,12 @@ from __future__ import annotations
 
 import logging
 from io import BytesIO
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 from PIL import Image
 
-from sims.env_wrapper import SimWrapper, SpecMismatchError, _apply_image_transform
-from robo_eval.specs import (
-    ActionObsSpec,
-    POSITION_DELTA,
-    GRIPPER_CLOSE_NEG,
-    GRIPPER_CLOSE_POS,
-    IMAGE_RGB,
-    LANGUAGE,
-)
+from sims.env_wrapper import SimWrapper, SpecMismatchError
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -37,6 +28,7 @@ from robo_eval.specs import (
 
 def _encode_image(img: Image.Image) -> str:
     import base64
+
     buf = BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("utf-8")
@@ -49,8 +41,18 @@ def _pi05_action_spec() -> dict:
     """Canonical pi05 action spec dict (ActionObsSpec.to_dict() format)."""
     return {
         "position": {"name": "position", "dims": 3, "format": "delta_xyz", "range": [-1, 1]},
-        "rotation": {"name": "rotation", "dims": 3, "format": "delta_axisangle", "range": [-3.15, 3.15]},
-        "gripper": {"name": "gripper", "dims": 1, "format": "binary_close_negative", "range": [-1, 1]},
+        "rotation": {
+            "name": "rotation",
+            "dims": 3,
+            "format": "delta_axisangle",
+            "range": [-3.15, 3.15],
+        },
+        "gripper": {
+            "name": "gripper",
+            "dims": 1,
+            "format": "binary_close_negative",
+            "range": [-1, 1],
+        },
     }
 
 
@@ -67,14 +69,27 @@ def _pi05_obs_spec() -> dict:
 def _libero_action_spec() -> dict:
     """Canonical LIBERO sim action spec dict (what sim consumes, accepts delta_axisangle)."""
     return {
-        "position": {"name": "position", "dims": 3, "format": "delta_xyz", "range": [-1, 1],
-                     "accepts": ["delta_xyz", "delta_axisangle"]},
-        "rotation": {"name": "rotation", "dims": 3, "format": "delta_axisangle",
-                     "range": [-3.15, 3.15],
-                     "accepts": ["delta_axisangle", "axis_angle"]},
-        "gripper": {"name": "gripper", "dims": 1, "format": "binary_close_negative",
-                    "range": [-1, 1],
-                    "accepts": ["binary_close_negative"]},
+        "position": {
+            "name": "position",
+            "dims": 3,
+            "format": "delta_xyz",
+            "range": [-1, 1],
+            "accepts": ["delta_xyz", "delta_axisangle"],
+        },
+        "rotation": {
+            "name": "rotation",
+            "dims": 3,
+            "format": "delta_axisangle",
+            "range": [-3.15, 3.15],
+            "accepts": ["delta_axisangle", "axis_angle"],
+        },
+        "gripper": {
+            "name": "gripper",
+            "dims": 1,
+            "format": "binary_close_negative",
+            "range": [-1, 1],
+            "accepts": ["binary_close_negative"],
+        },
     }
 
 
@@ -124,7 +139,7 @@ def _make_sim_info(
     cameras=None,
 ):
     cam_list = []
-    for role in (cameras or ["primary", "wrist"]):
+    for role in cameras or ["primary", "wrist"]:
         cam_list.append({"key": f"{role}_image", "resolution": [256, 256], "role": role})
     info = {
         "sim": "test-sim",
@@ -155,11 +170,11 @@ def _make_wrapper(vla_info: dict, sim_info: dict, monkeypatch, strict: str = "1"
     monkeypatch:
         pytest monkeypatch fixture.
     strict:
-        Value for ROBO_EVAL_STRICT_SPECS env var ("1" = strict, "0" = lenient).
+        Value for ROBOEVAL_STRICT_SPECS env var ("1" = strict, "0" = lenient).
     """
-    from world_stubs import BaseWorldStub
+    from roboeval.world_stubs import BaseWorldStub
 
-    monkeypatch.setenv("ROBO_EVAL_STRICT_SPECS", strict)
+    monkeypatch.setenv("ROBOEVAL_STRICT_SPECS", strict)
 
     def fake_base_init(self, initial_image=None, task_instruction=None):
         self.subtask_frame_tuples = []
@@ -177,6 +192,7 @@ def _make_wrapper(vla_info: dict, sim_info: dict, monkeypatch, strict: str = "1"
         model_chunk_size = vla_info.get("action_chunk_size", 1)
         self_._effective_chunk_size = self_._chunk_size_override or model_chunk_size
         from sims.env_wrapper import ActionChunkBuffer
+
         self_._action_buffer = ActionChunkBuffer(
             chunk_size=self_._effective_chunk_size,
             action_ensemble=self_._action_ensemble,
@@ -197,8 +213,10 @@ def _make_wrapper(vla_info: dict, sim_info: dict, monkeypatch, strict: str = "1"
     class _FakeGetResp:
         ok = True
         status_code = 200
+
         def __init__(self, payload):
             self._payload = payload
+
         def json(self):
             return self._payload
 
@@ -210,6 +228,7 @@ def _make_wrapper(vla_info: dict, sim_info: dict, monkeypatch, strict: str = "1"
         return _FakeGetResp({"ready": True})
 
     import requests as req_mod
+
     monkeypatch.setattr(req_mod, "get", fake_get)
 
     return SimWrapper(
@@ -314,7 +333,7 @@ class TestHardImageTransformConflict:
             _make_wrapper(vla, sim, monkeypatch)
 
     def test_strict_off_no_raise(self, monkeypatch):
-        """ROBO_EVAL_STRICT_SPECS=0 demotes HARD to warning — no exception raised."""
+        """ROBOEVAL_STRICT_SPECS=0 demotes HARD to warning — no exception raised."""
         vla = _make_vla_info(image_transform="flip_hw")
         sim = _make_sim_info(image_transform="applied_in_sim")
         # Should not raise with strict=0
@@ -335,7 +354,10 @@ class TestHardDimMismatch:
         """VLA declares 3-dim position, sim expects 6-dim → SpecMismatchError."""
         bad_vla_action = dict(_pi05_action_spec())
         bad_vla_action["position"] = {
-            "name": "position", "dims": 6, "format": "delta_xyz", "range": [-1, 1]
+            "name": "position",
+            "dims": 6,
+            "format": "delta_xyz",
+            "range": [-1, 1],
         }
         vla = _make_vla_info(
             action_spec=bad_vla_action,
@@ -352,7 +374,10 @@ class TestHardDimMismatch:
         """VLA gripper=binary_close_positive, sim expects binary_close_negative → HARD."""
         bad_vla_action = dict(_pi05_action_spec())
         bad_vla_action["gripper"] = {
-            "name": "gripper", "dims": 1, "format": "binary_close_positive", "range": [-1, 1]
+            "name": "gripper",
+            "dims": 1,
+            "format": "binary_close_positive",
+            "range": [-1, 1],
         }
         vla = _make_vla_info(
             action_spec=bad_vla_action,
@@ -380,10 +405,13 @@ class TestHardDimMismatch:
             _make_wrapper(vla, sim, monkeypatch)
 
     def test_strict_off_dim_mismatch_no_raise(self, monkeypatch):
-        """ROBO_EVAL_STRICT_SPECS=0 — action dim mismatch doesn't raise."""
+        """ROBOEVAL_STRICT_SPECS=0 — action dim mismatch doesn't raise."""
         bad_vla_action = dict(_pi05_action_spec())
         bad_vla_action["position"] = {
-            "name": "position", "dims": 6, "format": "delta_xyz", "range": [-1, 1]
+            "name": "position",
+            "dims": 6,
+            "format": "delta_xyz",
+            "range": [-1, 1],
         }
         vla = _make_vla_info(
             action_spec=bad_vla_action,
@@ -409,7 +437,10 @@ class TestWarnOnlyMismatches:
         """Mismatched range is WARN: logged but no exception raised."""
         wide_range_vla_action = dict(_pi05_action_spec())
         wide_range_vla_action["position"] = {
-            "name": "position", "dims": 3, "format": "delta_xyz", "range": [-2.0, 2.0]
+            "name": "position",
+            "dims": 3,
+            "format": "delta_xyz",
+            "range": [-2.0, 2.0],
         }
         vla = _make_vla_info(
             action_spec=wide_range_vla_action,
@@ -425,8 +456,9 @@ class TestWarnOnlyMismatches:
         assert w.action_dim == 7
         # Warning must appear in log
         warn_msgs = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any("range" in m.lower() or "WARN" in m for m in warn_msgs), \
+        assert any("range" in m.lower() or "WARN" in m for m in warn_msgs), (
             f"Expected range WARN in log; got: {warn_msgs}"
+        )
 
 
 # ===========================================================================
@@ -439,14 +471,15 @@ class TestLegacyFallback:
 
     def test_no_spec_keys_no_raise(self, monkeypatch, caplog):
         """Neither side declares specs → legacy WARN, no exception."""
-        vla = _make_vla_info()   # no action_spec / observation_spec
-        sim = _make_sim_info()   # no action_spec / observation_spec
+        vla = _make_vla_info()  # no action_spec / observation_spec
+        sim = _make_sim_info()  # no action_spec / observation_spec
         with caplog.at_level(logging.WARNING, logger="sims.env_wrapper"):
             w = _make_wrapper(vla, sim, monkeypatch)
         assert w.action_dim == 7
         warn_msgs = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any("legacy" in m.lower() or "no action_spec" in m.lower() for m in warn_msgs), \
+        assert any("legacy" in m.lower() or "no action_spec" in m.lower() for m in warn_msgs), (
             f"Expected legacy WARN; got: {warn_msgs}"
+        )
 
     def test_only_vla_has_spec_raises_in_strict(self, monkeypatch):
         """VLA declares ActionObsSpec but sim does not → HARD failure (strict mode).
@@ -473,7 +506,7 @@ class TestLegacyFallback:
             _make_wrapper(vla, sim, monkeypatch)
 
     def test_one_sided_spec_strict_off_no_raise(self, monkeypatch):
-        """ROBO_EVAL_STRICT_SPECS=0 demotes one-sided spec absence to WARN."""
+        """ROBOEVAL_STRICT_SPECS=0 demotes one-sided spec absence to WARN."""
         vla = _make_vla_info(
             action_spec=_pi05_action_spec(),
             observation_spec=_pi05_obs_spec(),

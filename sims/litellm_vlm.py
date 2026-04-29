@@ -38,7 +38,9 @@ def _assert_litellm_reachable(host: str, port: int) -> None:
         )
 
 
-def setup_litellm_client(host="localhost", port=_DEFAULT_PORT, api_key="not-needed", model_override=None):
+def setup_litellm_client(
+    host="localhost", port=_DEFAULT_PORT, api_key="not-needed", model_override=None
+):
     """Configure vlm_methods to use a litellm proxy at ``host:port``.
 
     Args:

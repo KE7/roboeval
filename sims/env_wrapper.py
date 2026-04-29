@@ -4,23 +4,25 @@ Simulator Environment Wrapper for LITEN.
 Wraps robotic simulators (LIBERO, RoboCasa, RoboTwin, LIBERO-Pro) as a
 BaseWorldStub by communicating with a sim_worker HTTP server.
 """
+
 from __future__ import annotations
 
 import base64
 import logging
 import os
-from typing import Optional
+from io import BytesIO
+
 import numpy as np
 import requests
-from io import BytesIO
 from PIL import Image
+
+from roboeval.world_stubs import BaseWorldStub
 
 logger = logging.getLogger(__name__)
 
-from world_stubs import BaseWorldStub
-
 try:
-    from robo_eval.specs import ActionObsSpec, check_specs
+    from roboeval.specs import ActionObsSpec, check_specs
+
     _SPECS_AVAILABLE = True
 except ImportError:
     _SPECS_AVAILABLE = False
@@ -142,18 +144,19 @@ class ActionChunkBuffer:
         """Discard all buffered actions (call on episode reset or new subtask)."""
         self._buffer = []
 
+
 # Expected action space per simulator (type + dim) for action translation.
 # Also used for random-action fallback sizing (via the "dim" field).
 SIM_EXPECTED_ACTION_SPACE = {
-    "libero":     {"type": "eef_delta", "dim": 7},
+    "libero": {"type": "eef_delta", "dim": 7},
     "libero_pro": {"type": "eef_delta", "dim": 7},
     "libero_infinity": {"type": "eef_delta", "dim": 7},
-    "robocasa":   {"type": "eef_delta", "dim": 12},
-    "robotwin":   {"type": "joint_pos", "dim": 14},
+    "robocasa": {"type": "eef_delta", "dim": 12},
+    "robotwin": {"type": "joint_pos", "dim": 14},
     # gym-aloha bimanual sim: 14-dim absolute joint positions (7 per arm)
-    "aloha_gym":  {"type": "joint_pos", "dim": 14},
+    "aloha_gym": {"type": "joint_pos", "dim": 14},
     # gym-pusht: 2-dim (x, y) end-effector position in pixel space [0,512]
-    "gym_pusht":  {"type": "eef_xy", "dim": 2},
+    "gym_pusht": {"type": "eef_xy", "dim": 2},
     # Meta-World (Sawyer robot): 4-dim Sawyer eef-delta [dx, dy, dz, gripper].
     "metaworld": {"type": "eef_delta", "dim": 4},
 }
@@ -177,16 +180,16 @@ SIM_MAX_STEPS = {
 }
 
 # Suite-specific rollout horizons.
-# CANONICAL definition lives in robo_eval/config.py:SUITE_MAX_STEPS.
-# env_wrapper runs in the sim venv (Python 3.8) which cannot import robo_eval,
+# CANONICAL definition lives in roboeval/config.py:SUITE_MAX_STEPS.
+# env_wrapper runs in the sim venv (Python 3.8) which cannot import roboeval,
 # so we keep a local copy here. If you update one, update the other.
 SUITE_MAX_STEPS = {
     # Standard LIBERO suites (matching lerobot TASK_SUITE_MAX_STEPS values)
-    "libero_spatial": 280,   # longest training demo has 193 steps
-    "libero_object": 280,    # longest training demo has 254 steps
-    "libero_goal": 300,      # longest training demo has 270 steps
-    "libero_10": 520,        # longest training demo has 505 steps
-    "libero_90": 400,        # longest training demo has 373 steps
+    "libero_spatial": 280,  # longest training demo has 193 steps
+    "libero_object": 280,  # longest training demo has 254 steps
+    "libero_goal": 300,  # longest training demo has 270 steps
+    "libero_10": 520,  # longest training demo has 505 steps
+    "libero_90": 400,  # longest training demo has 373 steps
     # LIBERO-INF suites
     "libero_infinity_spatial": 300,
     "libero_infinity_object": 300,
@@ -221,7 +224,6 @@ def _image_to_numpy(img: Image.Image) -> np.ndarray:
     return np.array(img.convert("RGB"))
 
 
-
 def _apply_image_transform(img: Image.Image, transform: str) -> Image.Image:
     if not transform or transform == "none":
         return img
@@ -237,6 +239,7 @@ def _apply_image_transform(img: Image.Image, transform: str) -> Image.Image:
     else:
         raise ValueError(f"Unknown image_transform: {transform}")
     return Image.fromarray(arr)
+
 
 class SimWrapper(BaseWorldStub):
     """
@@ -255,11 +258,11 @@ class SimWrapper(BaseWorldStub):
         camera_resolution: int = 256,
         suite: str = None,
         max_steps: int = None,
-        vla_server_url: str = os.environ.get('VLA_URL', 'http://localhost:5100'),
+        vla_server_url: str = os.environ.get("VLA_URL", "http://localhost:5100"),
         headless: bool = False,
         delta_actions: bool = False,
         no_vlm: bool = False,
-        sim_config: Optional[dict] = None,
+        sim_config: dict | None = None,
         chunk_size: int = None,
         action_ensemble: str = "newest",
         ema_alpha: float = 0.5,
@@ -318,20 +321,21 @@ class SimWrapper(BaseWorldStub):
 
         # Initialize the environment via HTTP, passing the headless flag so the
         # sim worker can configure MUJOCO_GL and has_renderer accordingly.
-        resp = self._post("/init", {
-            "sim": sim_name,
-            "task": task_name,
-            "camera_resolution": camera_resolution,
-            "suite": suite,
-            "headless": headless,
-            "delta_actions": delta_actions,
-            "sim_config": self._sim_config,
-        })
+        resp = self._post(
+            "/init",
+            {
+                "sim": sim_name,
+                "task": task_name,
+                "camera_resolution": camera_resolution,
+                "suite": suite,
+                "headless": headless,
+                "delta_actions": delta_actions,
+                "sim_config": self._sim_config,
+            },
+        )
         if not resp.get("success"):
-            raise RuntimeError(
-                f"Failed to init sim env: {resp.get('error', 'unknown')}"
-            )
-            
+            raise RuntimeError(f"Failed to init sim env: {resp.get('error', 'unknown')}")
+
         # Fetch sim info and negotiate
         self._fetch_sim_info()
         self._negotiate_spaces()
@@ -382,7 +386,6 @@ class SimWrapper(BaseWorldStub):
             raise RuntimeError(f"[SimWrapper] GET {path} returned HTTP {r.status_code}: {err}")
         return r.json()
 
-
     def _parse_images_from_resp(self, resp: dict) -> None:
         """Populate ``self._current_images`` from an HTTP response dict.
 
@@ -402,9 +405,7 @@ class SimWrapper(BaseWorldStub):
         """
         if "images" in resp and isinstance(resp["images"], dict):
             self._current_images = {
-                role: _apply_image_transform(
-                    _decode_b64_image(b64), self._image_transform
-                )
+                role: _apply_image_transform(_decode_b64_image(b64), self._image_transform)
                 for role, b64 in resp["images"].items()
             }
         else:
@@ -436,17 +437,19 @@ class SimWrapper(BaseWorldStub):
     def _negotiate_spaces(self):
         p_type = self._policy_action_space.get("type")
         p_dim = self._policy_action_space.get("dim")
-        
+
         s_type = self._sim_action_space.get("type")
         s_dim = self._sim_action_space.get("dim")
         s_accepted = self._sim_action_space.get("accepted_dims", [])
 
         if p_type != s_type:
             raise ValueError(f"Action space type mismatch: policy='{p_type}', sim='{s_type}'")
-        
+
         if s_accepted:
             if p_dim not in s_accepted:
-                raise ValueError(f"Action space dim mismatch: policy={p_dim} not in sim accepted={s_accepted}")
+                raise ValueError(
+                    f"Action space dim mismatch: policy={p_dim} not in sim accepted={s_accepted}"
+                )
         else:
             if p_dim != s_dim:
                 raise ValueError(f"Action space dim mismatch: policy={p_dim}, sim={s_dim}")
@@ -463,7 +466,9 @@ class SimWrapper(BaseWorldStub):
         sim_cams = [c.get("role") for c in self._sim_info.get("obs_space", {}).get("cameras", [])]
         for c in req_cams:
             if c not in sim_cams:
-                raise ValueError(f"Camera mismatch: VLA requires '{c}' but sim only provides {sim_cams}")
+                raise ValueError(
+                    f"Camera mismatch: VLA requires '{c}' but sim only provides {sim_cams}"
+                )
 
         req_state_format = req.get("state_format", "flat")
         req_state_dim = req.get("state_dim", 0)
@@ -482,7 +487,7 @@ class SimWrapper(BaseWorldStub):
         """Cross-validate VLA and sim ActionObsSpec contracts after both /info calls complete.
 
         Severity rules applied here:
-        - HARD → raise SpecMismatchError (unless ROBO_EVAL_STRICT_SPECS=0)
+        - HARD → raise SpecMismatchError (unless ROBOEVAL_STRICT_SPECS=0)
         - WARN → log warning
         - IGNORE / legacy (no specs) → log once at INFO, continue
 
@@ -490,10 +495,10 @@ class SimWrapper(BaseWorldStub):
         - sim says "applied_in_sim" AND vla says "flip_hw" or "flip_h" → double flip
         - sim says "none" or absent AND vla says "flip_hw" or "flip_h" → missing backend transform
 
-        Gate: set ROBO_EVAL_STRICT_SPECS=0 to demote all HARD failures to WARN
+        Gate: set ROBOEVAL_STRICT_SPECS=0 to demote all HARD failures to WARN
         (escape hatch for legacy servers in CI).
         """
-        strict = os.environ.get("ROBO_EVAL_STRICT_SPECS", "1") not in ("0", "false", "False")
+        strict = os.environ.get("ROBOEVAL_STRICT_SPECS", "1") not in ("0", "false", "False")
 
         # ── image_transform HARD check ────────────────────────────────────────
         sim_img_xfm = self._sim_info.get("obs_space", {}).get("image_transform", "none")
@@ -521,11 +526,11 @@ class SimWrapper(BaseWorldStub):
 
         # ── ActionObsSpec check via check_specs() ──────────────────────────────────
         if not _SPECS_AVAILABLE:
-            logger.debug("robo_eval.specs not available; skipping ActionObsSpec validation")
+            logger.debug("roboeval.specs not available; skipping ActionObsSpec validation")
             return
 
         # Deserialize spec dicts from both sides
-        def _load_spec(raw: dict) -> "dict[str, ActionObsSpec]":
+        def _load_spec(raw: dict) -> dict[str, ActionObsSpec]:
             if not raw:
                 return {}
             result = {}
@@ -630,13 +635,12 @@ class SimWrapper(BaseWorldStub):
             )
             logger.info(
                 "Policy info: model=%s, action_space=%s",
-                self._policy_info.get('model_id', '?'),
+                self._policy_info.get("model_id", "?"),
                 self._policy_action_space,
             )
         except Exception:
             logger.warning(
-                "Could not reach policy server at %s/info. "
-                "Using default action space %s.",
+                "Could not reach policy server at %s/info. Using default action space %s.",
                 self.vla_server_url,
                 self._policy_action_space,
             )
@@ -669,8 +673,7 @@ class SimWrapper(BaseWorldStub):
         """
         if not isinstance(chunk, list) or not chunk:
             raise ValueError(
-                "VLA returned an empty or non-list action chunk; "
-                f"got: {type(chunk).__name__}"
+                f"VLA returned an empty or non-list action chunk; got: {type(chunk).__name__}"
             )
         for i, a in enumerate(chunk):
             arr = np.asarray(a, dtype=float)
@@ -688,9 +691,7 @@ class SimWrapper(BaseWorldStub):
                     f"normalisation is wrong, or training diverged."
                 )
 
-    def _translate_action(
-        self, action: list, from_space: dict, to_space: dict
-    ) -> list:
+    def _translate_action(self, action: list, from_space: dict, to_space: dict) -> list:
         """Translate an action from policy output space to simulator input space.
 
         Supported translations:
@@ -776,9 +777,7 @@ class SimWrapper(BaseWorldStub):
         buf = BytesIO()
         image.save(buf, format="PNG")
 
-        images = {
-            "primary": base64.b64encode(buf.getvalue()).decode("utf-8")
-        }
+        images = {"primary": base64.b64encode(buf.getvalue()).decode("utf-8")}
         # Include any additional camera images from self._current_images
         for role in ("wrist", "secondary"):
             extra_img = self._current_images.get(role)
@@ -790,7 +789,7 @@ class SimWrapper(BaseWorldStub):
         state_dict = {}
         if state is not None:
             state_dict["flat"] = state
-            
+
         if getattr(self, "_current_state_dict", None) is not None:
             state_dict["structured"] = self._current_state_dict
 
@@ -805,12 +804,10 @@ class SimWrapper(BaseWorldStub):
         if r.status_code != 200:
             # Proxy 502/503 responses may not be valid JSON (e.g. nginx HTML)
             try:
-                error_msg = r.json().get('error', f'HTTP {r.status_code}')
+                error_msg = r.json().get("error", f"HTTP {r.status_code}")
             except (ValueError, AttributeError):
-                error_msg = r.text if r.text else f'HTTP {r.status_code}'
-            raise ConnectionError(
-                f"[SimWrapper] VLA proxy returned {r.status_code}: {error_msg}"
-            )
+                error_msg = r.text if r.text else f"HTTP {r.status_code}"
+            raise ConnectionError(f"[SimWrapper] VLA proxy returned {r.status_code}: {error_msg}")
         resp = r.json()
         return resp["actions"]
 
@@ -843,11 +840,11 @@ class SimWrapper(BaseWorldStub):
             requests.get(f"{self.vla_server_url}/health", timeout=5)
             if not self._policy_info:
                 self._fetch_policy_info()
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.ConnectionError as exc:
             raise ConnectionError(
                 f"[SimWrapper] VLA server unreachable at {self.vla_server_url}. "
                 f"Cannot execute subtask '{command}'. Aborting episode."
-            )
+            ) from exc
 
         logger.info(
             "Using VLA service at %s (policy=%s, sim=%s, max_steps=%d)",
@@ -866,9 +863,7 @@ class SimWrapper(BaseWorldStub):
         # Use the reset observation directly so the first policy call sees the
         # exact scene returned by /reset instead of an extra round-trip /obs.
         current_obs = (
-            self.current_image.copy()
-            if self.current_image is not None
-            else self._get_obs_image()
+            self.current_image.copy() if self.current_image is not None else self._get_obs_image()
         )
         frames.append(_image_to_numpy(current_obs))
 
@@ -885,12 +880,12 @@ class SimWrapper(BaseWorldStub):
                         state=self._current_state or None,
                     )
                     self._validate_action_chunk(chunk, expected_dim=self.action_dim)
-                except requests.exceptions.ConnectionError:
+                except requests.exceptions.ConnectionError as exc:
                     raise ConnectionError(
                         f"[SimWrapper] VLA server became unreachable at "
                         f"{self.vla_server_url} during rollout (step {step}/{self.max_steps}). "
                         f"Aborting episode."
-                    )
+                    ) from exc
                 self._action_buffer.push(chunk)
 
             # --- Pop one action from the buffer ---
@@ -911,7 +906,7 @@ class SimWrapper(BaseWorldStub):
 
             resp = self._post("/step", {"action": action})
             if "error" in resp:
-                logger.error("Step failed: %s", resp['error'])
+                logger.error("Step failed: %s", resp["error"])
                 done = True
                 break
 
@@ -947,19 +942,20 @@ class SimWrapper(BaseWorldStub):
         Used for crash recovery when the backend signals it is not initialized
         (e.g. after a sim worker restart or OOM-induced backend teardown).
         """
-        resp = self._post("/init", {
-            "sim": self.sim_name,
-            "task": self.task_name,
-            "camera_resolution": self.camera_resolution,
-            "suite": self.suite,
-            "headless": self._headless,
-            "delta_actions": self._delta_actions,
-            "sim_config": self._sim_config,
-        })
+        resp = self._post(
+            "/init",
+            {
+                "sim": self.sim_name,
+                "task": self.task_name,
+                "camera_resolution": self.camera_resolution,
+                "suite": self.suite,
+                "headless": self._headless,
+                "delta_actions": self._delta_actions,
+                "sim_config": self._sim_config,
+            },
+        )
         if not resp.get("success"):
-            raise RuntimeError(
-                f"Failed to re-init sim env: {resp.get('error', 'unknown')}"
-            )
+            raise RuntimeError(f"Failed to re-init sim env: {resp.get('error', 'unknown')}")
 
     def physical_reset(self, episode_index: int = None):
         """Reset the simulator environment via HTTP.
@@ -1028,7 +1024,7 @@ class SimWrapper(BaseWorldStub):
             logger.warning("check_success network error (returning False): %s", e)
             return False
         if "error" in resp:
-            logger.error("check_success failed: %s", resp['error'])
+            logger.error("check_success failed: %s", resp["error"])
             return False
         return resp.get("success", False)
 

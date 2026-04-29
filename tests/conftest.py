@@ -17,7 +17,7 @@ fake modules from corrupting scipy's array-API compatibility layer.
 from __future__ import annotations
 
 import sys
-from typing import Generator
+from collections.abc import Generator
 
 import pytest
 

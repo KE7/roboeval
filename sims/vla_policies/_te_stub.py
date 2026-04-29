@@ -8,7 +8,7 @@ unavailable on some platforms; only the optimizer uses them at runtime,
 so inference works fine with stubs.
 
 Usage:
-    import sims.vla_policies._te_stub  # noqa: F401
+    import sims.vla_policies._te_stub
 """
 
 import importlib.abc
@@ -94,9 +94,7 @@ class _TEStubFinder(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path, target=None):
         for pkg in self._PKGS:
             if fullname == pkg or fullname.startswith(pkg + "."):
-                return importlib.machinery.ModuleSpec(
-                    fullname, self._loader, is_package=True
-                )
+                return importlib.machinery.ModuleSpec(fullname, self._loader, is_package=True)
         return None
 
 

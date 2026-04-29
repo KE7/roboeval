@@ -2,23 +2,18 @@
 
 See docs/failure_modes.md for the expected behavior each test covers.
 """
+
 from __future__ import annotations
 
 import json
-import os
 import socket
-import subprocess
 import sys
 import time
-from pathlib import Path
-from unittest import mock
 
 import pytest
 
-from robo_eval import server_runner
-from sims import env_wrapper
-from sims import litellm_vlm
-
+from roboeval import server_runner
+from sims import env_wrapper, litellm_vlm
 
 # ---------------------------------------------------------------------------
 # Health polling returns readiness and surfaces load errors without masking
@@ -28,6 +23,7 @@ from sims import litellm_vlm
 
 def test_poll_health_returns_ready_when_status_ok(monkeypatch):
     """A healthy JSON response should report ready without an error message."""
+
     class _Resp:
         ok = True
         headers = {"content-type": "application/json"}
@@ -124,9 +120,7 @@ def test_validate_action_chunk_rejects_nan():
 def test_validate_action_chunk_rejects_wrong_shape():
     w = object.__new__(env_wrapper.SimWrapper)
     with pytest.raises(ValueError, match=r"dim=5 but .* negotiated action_dim is 7"):
-        env_wrapper.SimWrapper._validate_action_chunk(
-            w, [[0.0] * 5], expected_dim=7
-        )
+        env_wrapper.SimWrapper._validate_action_chunk(w, [[0.0] * 5], expected_dim=7)
 
 
 def test_validate_action_chunk_accepts_valid_chunk():
@@ -153,17 +147,15 @@ def test_assert_litellm_reachable_raises_with_remediation():
 
 
 def test_atomic_write_json_preserves_existing_on_oserror(tmp_path, monkeypatch):
-    from robo_eval.orchestrator import _atomic_write_json
+    from roboeval.orchestrator import _atomic_write_json
 
     out = tmp_path / "result.json"
     out.write_text(json.dumps({"old": True}))
 
-    real_replace = os.replace
-
     def boom(src, dst):
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr("robo_eval.orchestrator.os.replace", boom)
+    monkeypatch.setattr("roboeval.orchestrator.os.replace", boom)
 
     with pytest.raises(OSError):
         _atomic_write_json(out, {"new": True})
@@ -179,7 +171,7 @@ def test_atomic_write_json_preserves_existing_on_oserror(tmp_path, monkeypatch):
 
 
 def test_claim_output_path_unique_under_concurrency(tmp_path):
-    from robo_eval.orchestrator import EvalConfig, Orchestrator
+    from roboeval.orchestrator import EvalConfig, Orchestrator
 
     paths = set()
     for _ in range(20):

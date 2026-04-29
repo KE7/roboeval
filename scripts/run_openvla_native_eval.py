@@ -72,23 +72,24 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 SUITE_MODEL = {
     "libero_spatial": "openvla/openvla-7b-finetuned-libero-spatial",
-    "libero_10":      "openvla/openvla-7b-finetuned-libero-10",
+    "libero_10": "openvla/openvla-7b-finetuned-libero-10",
     # Add model IDs here to enable additional suites.
 }
 
 SUITE_MAX_STEPS = {
     "libero_spatial": 280,
-    "libero_object":  280,
-    "libero_goal":    300,
-    "libero_10":      520,
+    "libero_object": 280,
+    "libero_goal": 300,
+    "libero_10": 520,
 }
 
-NUM_WARMUP_STEPS = 10   # no-op steps after reset
+NUM_WARMUP_STEPS = 10  # no-op steps after reset
 
 
 # ---------------------------------------------------------------------------
 # Action processing
 # ---------------------------------------------------------------------------
+
 
 def process_action(action: np.ndarray) -> np.ndarray:
     """Post-process OpenVLA action for LIBERO.
@@ -109,6 +110,7 @@ def process_action(action: np.ndarray) -> np.ndarray:
 # Image extraction + flip
 # ---------------------------------------------------------------------------
 
+
 def get_agentview_image(obs) -> np.ndarray:
     """Extract third-person image and flip 180° (matches lerobot/openvla training)."""
     img = obs["agentview_image"]
@@ -118,6 +120,7 @@ def get_agentview_image(obs) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Model loading
 # ---------------------------------------------------------------------------
+
 
 def load_model(model_id: str, device: str = "cuda"):
     from transformers import AutoModelForVision2Seq, AutoProcessor
@@ -151,8 +154,10 @@ def load_model(model_id: str, device: str = "cuda"):
 # Single prediction
 # ---------------------------------------------------------------------------
 
-def predict(model, processor, device, img_np: np.ndarray, instruction: str,
-            unnorm_key: str) -> np.ndarray:
+
+def predict(
+    model, processor, device, img_np: np.ndarray, instruction: str, unnorm_key: str
+) -> np.ndarray:
     """Run one forward pass; returns raw 7-dim unnormalized action array."""
     pil_img = Image.fromarray(img_np)
     prompt = f"In: What action should the robot take to {instruction}?\nOut:"
@@ -172,6 +177,7 @@ def predict(model, processor, device, img_np: np.ndarray, instruction: str,
 # ---------------------------------------------------------------------------
 # LIBERO environment setup
 # ---------------------------------------------------------------------------
+
 
 def build_libero_env(task, resolution: int = 256):
     from libero.libero import get_libero_path
@@ -196,9 +202,12 @@ def build_libero_env(task, resolution: int = 256):
 # Single episode
 # ---------------------------------------------------------------------------
 
+
 def run_episode(
     env,
-    model, processor, device,
+    model,
+    processor,
+    device,
     task_description: str,
     unnorm_key: str,
     initial_state,
@@ -212,7 +221,7 @@ def run_episode(
         obs = env.get_observation()
 
     # Warmup: no-op for NUM_WARMUP_STEPS steps
-    warmup_action = [0.0] * 6 + [-1.0]   # all zeros, gripper open
+    warmup_action = [0.0] * 6 + [-1.0]  # all zeros, gripper open
     for _ in range(NUM_WARMUP_STEPS):
         obs, _, done, _ = env.step(warmup_action)
         if done:
@@ -236,10 +245,15 @@ def run_episode(
 # Task-level evaluation
 # ---------------------------------------------------------------------------
 
+
 def eval_task(
-    task_suite, task_id: int,
-    model, processor, device,
-    unnorm_key: str, max_steps: int,
+    task_suite,
+    task_id: int,
+    model,
+    processor,
+    device,
+    unnorm_key: str,
+    max_steps: int,
     n_episodes: int,
     log_file,
 ) -> tuple[int, int]:
@@ -254,12 +268,17 @@ def eval_task(
     for ep_idx in tqdm(range(n_episodes), desc=f"Task {task_id}", leave=False):
         init_state = init_states[ep_idx % len(init_states)]
         success = run_episode(
-            env, model, processor, device,
-            desc, unnorm_key, init_state, max_steps,
+            env,
+            model,
+            processor,
+            device,
+            desc,
+            unnorm_key,
+            init_state,
+            max_steps,
         )
         successes += int(success)
-        msg = (f"  task={task_id} ep={ep_idx} success={success} "
-               f"running={successes}/{ep_idx+1}")
+        msg = f"  task={task_id} ep={ep_idx} success={success} running={successes}/{ep_idx + 1}"
         log.info(msg)
         log_file.write(msg + "\n")
         log_file.flush()
@@ -271,6 +290,7 @@ def eval_task(
 # ---------------------------------------------------------------------------
 # Suite-level evaluation
 # ---------------------------------------------------------------------------
+
 
 def eval_suite(
     suite_name: str,
@@ -284,11 +304,16 @@ def eval_suite(
     from libero.libero import benchmark
 
     max_steps = SUITE_MAX_STEPS.get(suite_name, 300)
-    unnorm_key = suite_name   # model's norm_stats key matches suite name
+    unnorm_key = suite_name  # model's norm_stats key matches suite name
 
     log.info("=" * 60)
-    log.info("Suite: %s | model: %s | %d eps/task | start_task=%d",
-             suite_name, model_id, n_episodes, start_task)
+    log.info(
+        "Suite: %s | model: %s | %d eps/task | start_task=%d",
+        suite_name,
+        model_id,
+        n_episodes,
+        start_task,
+    )
     log.info("=" * 60)
 
     # Load model
@@ -339,32 +364,41 @@ def eval_suite(
             log_file.flush()
 
             suc, eps = eval_task(
-                task_suite, task_id,
-                model, processor, dev,
-                unnorm_key, max_steps, n_episodes, log_file,
+                task_suite,
+                task_id,
+                model,
+                processor,
+                dev,
+                unnorm_key,
+                max_steps,
+                n_episodes,
+                log_file,
             )
 
             total_suc += suc
             total_eps += eps
             rate = suc / eps if eps > 0 else 0.0
-            task_results.append({
-                "task_id": task_id,
-                "description": task.language,
-                "success": suc,
-                "total": eps,
-                "rate": rate,
-            })
+            task_results.append(
+                {
+                    "task_id": task_id,
+                    "description": task.language,
+                    "success": suc,
+                    "total": eps,
+                    "rate": rate,
+                }
+            )
 
-            summary = (f"Task {task_id} result: {suc}/{eps} = {rate*100:.1f}% | "
-                       f"overall so far: {total_suc}/{total_eps} = "
-                       f"{total_suc/total_eps*100:.1f}%")
+            summary = (
+                f"Task {task_id} result: {suc}/{eps} = {rate * 100:.1f}% | "
+                f"overall so far: {total_suc}/{total_eps} = "
+                f"{total_suc / total_eps * 100:.1f}%"
+            )
             log.info(summary)
             log_file.write(summary + "\n\n")
             log_file.flush()
 
         overall_rate = total_suc / total_eps if total_eps > 0 else 0.0
-        final = (f"\nFINAL: {suite_name} | {total_suc}/{total_eps} = "
-                 f"{overall_rate*100:.1f}%\n")
+        final = f"\nFINAL: {suite_name} | {total_suc}/{total_eps} = {overall_rate * 100:.1f}%\n"
         log.info(final.strip())
         log_file.write(final)
 
@@ -388,21 +422,26 @@ def eval_suite(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def parse_args():
     p = argparse.ArgumentParser(description="OpenVLA native LIBERO eval")
-    p.add_argument("--suite", default="libero_spatial",
-                   choices=list(SUITE_MAX_STEPS.keys()),
-                   help="LIBERO task suite to evaluate")
-    p.add_argument("--model-id", default=None,
-                   help="Override HuggingFace model ID (default: auto from suite)")
-    p.add_argument("--n-episodes", type=int, default=20,
-                   help="Episodes per task (default: 20)")
-    p.add_argument("--out-dir", default="results/openvla_native",
-                   help="Output directory for logs and JSON")
-    p.add_argument("--device", default="cuda",
-                   help="Torch device (default: cuda)")
-    p.add_argument("--start-task", type=int, default=0,
-                   help="Resume from this task ID (0-indexed, default: 0)")
+    p.add_argument(
+        "--suite",
+        default="libero_spatial",
+        choices=list(SUITE_MAX_STEPS.keys()),
+        help="LIBERO task suite to evaluate",
+    )
+    p.add_argument(
+        "--model-id", default=None, help="Override HuggingFace model ID (default: auto from suite)"
+    )
+    p.add_argument("--n-episodes", type=int, default=20, help="Episodes per task (default: 20)")
+    p.add_argument(
+        "--out-dir", default="results/openvla_native", help="Output directory for logs and JSON"
+    )
+    p.add_argument("--device", default="cuda", help="Torch device (default: cuda)")
+    p.add_argument(
+        "--start-task", type=int, default=0, help="Resume from this task ID (0-indexed, default: 0)"
+    )
     return p.parse_args()
 
 
@@ -438,11 +477,15 @@ def main():
 
     print("\n" + "=" * 60)
     print(f"OPENVLA NATIVE DONE: {suite}")
-    print(f"Success rate: {result['success_rate']*100:.1f}%  "
-          f"({result['total_success']}/{result['total_episodes']})")
+    print(
+        f"Success rate: {result['success_rate'] * 100:.1f}%  "
+        f"({result['total_success']}/{result['total_episodes']})"
+    )
     for t in result["tasks"]:
-        print(f"  Task {t['task_id']:2d}: {t['success']:2d}/{t['total']:2d} "
-              f"= {t['rate']*100:.0f}%  {t['description']}")
+        print(
+            f"  Task {t['task_id']:2d}: {t['success']:2d}/{t['total']:2d} "
+            f"= {t['rate'] * 100:.0f}%  {t['description']}"
+        )
     print("=" * 60)
 
 

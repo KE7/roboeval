@@ -24,12 +24,17 @@ def _stub_optional_modules() -> None:
     import the backend module and exercise metadata-only behavior.
     """
     for mod in [
-        "robosuite", "robosuite.wrappers",
-        "libero", "libero.envs", "libero.envs.libero_envs",
+        "robosuite",
+        "robosuite.wrappers",
+        "libero",
+        "libero.envs",
+        "libero.envs.libero_envs",
         "libero.envs.bddl_base_domain",
-        "libero.libero", "libero.libero.benchmark",
+        "libero.libero",
+        "libero.libero.benchmark",
         "bddl",
-        "gymnasium", "gym_aloha",
+        "gymnasium",
+        "gym_aloha",
         "metaworld",
     ]:
         if mod not in sys.modules:
@@ -48,11 +53,11 @@ def _stub_optional_modules() -> None:
 
 _stub_optional_modules()
 
-from sims.sim_worker import (  # noqa: E402  (after stubbing)
+from sims.sim_worker import (  # after stubbing
+    _MW_TASK_DESCRIPTIONS,
     BACKENDS,
     MetaWorldBackend,
     SimBackendBase,
-    _MW_TASK_DESCRIPTIONS,
 )
 
 
@@ -70,10 +75,8 @@ class TestMetaWorldBackendABCCompliance(unittest.TestCase):
     def test_implements_all_abstract_methods(self):
         """No abstract methods leak through."""
         b = MetaWorldBackend()
-        for name in ("init", "reset", "step", "get_obs", "check_success",
-                     "close", "get_info"):
-            self.assertTrue(callable(getattr(b, name)),
-                            f"missing method: {name}")
+        for name in ("init", "reset", "step", "get_obs", "check_success", "close", "get_info"):
+            self.assertTrue(callable(getattr(b, name)), f"missing method: {name}")
 
     def test_close_is_idempotent_when_uninitialised(self):
         b = MetaWorldBackend()
@@ -100,8 +103,14 @@ class TestMetaWorldBackendGetInfo(unittest.TestCase):
 
     def test_info_top_level_keys(self):
         info = self.backend.get_info()
-        for key in ("action_space", "obs_space", "max_steps", "delta_actions",
-                    "action_spec", "observation_spec"):
+        for key in (
+            "action_space",
+            "obs_space",
+            "max_steps",
+            "delta_actions",
+            "action_spec",
+            "observation_spec",
+        ):
             self.assertIn(key, info, f"get_info() missing key: {key}")
 
     def test_action_space_is_4dim_eef_delta(self):
@@ -187,8 +196,7 @@ class TestMetaWorldBackendTaskResolution(unittest.TestCase):
         """Every task in TASKS must have an entry in _MW_TASK_DESCRIPTIONS."""
         for task in MetaWorldBackend.TASKS:
             self.assertIn(
-                task, _MW_TASK_DESCRIPTIONS,
-                f"_MW_TASK_DESCRIPTIONS missing entry for task: {task}"
+                task, _MW_TASK_DESCRIPTIONS, f"_MW_TASK_DESCRIPTIONS missing entry for task: {task}"
             )
 
 
@@ -206,15 +214,13 @@ class TestMetaWorldBackendSpecGateContract(unittest.TestCase):
 
     def test_action_spec_dims_is_4(self):
         eef = self.info["action_spec"]["eef_delta"]
-        self.assertEqual(eef["dims"], 4,
-                         "Changing dims from 4 breaks the spec-gate-blocked test.")
+        self.assertEqual(eef["dims"], 4, "Changing dims from 4 breaks the spec-gate-blocked test.")
 
     def test_accepted_dims_does_not_contain_7(self):
         """If 7 is added to accepted_dims, the spec gate won't fire for 7-dim VLAs."""
         accepted = self.info["action_space"]["accepted_dims"]
         self.assertNotIn(
-            7, accepted,
-            "accepted_dims must NOT include 7 in v0.1 — adding it bypasses the gate."
+            7, accepted, "accepted_dims must NOT include 7 in v0.1 — adding it bypasses the gate."
         )
 
     def test_action_space_dim_is_4(self):
@@ -271,8 +277,7 @@ class TestMetaWorldBackendStepActionAdaptation(unittest.TestCase):
 
     def test_step_returns_5tuple(self):
         result = self.backend.step([0.0, 0.0, 0.0, 0.0])
-        self.assertEqual(len(result), 5,
-                         "step() must return (img, img2, reward, done, info)")
+        self.assertEqual(len(result), 5, "step() must return (img, img2, reward, done, info)")
 
 
 class TestMetaWorldBackendCheckSuccess(unittest.TestCase):
@@ -296,8 +301,7 @@ class TestMetaWorldTaskDescriptions(unittest.TestCase):
 
     def test_all_keys_end_with_v3(self):
         for name in _MW_TASK_DESCRIPTIONS:
-            self.assertTrue(name.endswith("-v3"),
-                            f"Unexpected task name format: {name}")
+            self.assertTrue(name.endswith("-v3"), f"Unexpected task name format: {name}")
 
     def test_all_descriptions_non_empty(self):
         for name, desc in _MW_TASK_DESCRIPTIONS.items():

@@ -12,7 +12,6 @@ except ImportError:
     }
 
 from sims.sim_worker import LiberoBackend
-from sims.vla_policies import pi05_policy
 
 
 class _DummyController:
@@ -83,6 +82,7 @@ def test_openvla_gripper_postprocessing_matches_policy_server():
 
     This test does NOT require torch, so it can run in any environment.
     """
+
     def process_action_native_eval(raw_gripper):
         """Simulate native eval gripper post-processing."""
         gripper = -(1.0 if raw_gripper > 0.0 else -1.0)
@@ -100,8 +100,7 @@ def test_openvla_gripper_postprocessing_matches_policy_server():
         native = process_action_native_eval(val)
         server = policy_server_gripper(val)
         assert native == server, (
-            f"Gripper mismatch at input={val}: "
-            f"native_eval={native}, policy_server={server}"
+            f"Gripper mismatch at input={val}: native_eval={native}, policy_server={server}"
         )
 
 
@@ -115,6 +114,7 @@ def test_openvla_gripper_convention_rlds_to_libero():
     - Model outputs > 0 (close intent) → -1 (LIBERO close)
     - Model outputs <= 0 (open intent) → 1 (LIBERO open)
     """
+
     def gripper_postprocess(raw_gripper):
         """Canonical gripper post-processing from openvla_policy.py."""
         return -(1.0 if raw_gripper > 0.0 else -1.0)
@@ -126,4 +126,4 @@ def test_openvla_gripper_convention_rlds_to_libero():
     # Non-positive values (RLDS "open" intent) should map to 1 (LIBERO "open")
     assert gripper_postprocess(-0.5) == 1.0  # model says open → LIBERO open
     assert gripper_postprocess(-1.0) == 1.0
-    assert gripper_postprocess(0.0) == 1.0   # boundary case
+    assert gripper_postprocess(0.0) == 1.0  # boundary case

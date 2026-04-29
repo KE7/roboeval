@@ -18,6 +18,7 @@ Usage:
 Endpoints (see base.py):
     GET  /health  GET  /info  POST /reset  POST /predict
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,15 +27,16 @@ import logging
 from io import BytesIO
 
 import numpy as np
-from sims.vla_policies.base import VLAPolicyBase, detect_lerobot_image_transform, make_app
-from sims.vla_policies.vla_schema import VLAObservation
-from robo_eval.specs import (
-    ActionObsSpec,
-    POSITION_DELTA,
+
+from roboeval.specs import (
     GRIPPER_CLOSE_NEG,
     IMAGE_RGB,
     LANGUAGE,
+    POSITION_DELTA,
+    ActionObsSpec,
 )
+from sims.vla_policies.base import VLAPolicyBase, make_app
+from sims.vla_policies.vla_schema import VLAObservation
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +98,9 @@ class Pi05Policy(VLAPolicyBase):
         self.ready = True
         logger.info(
             "Pi 0.5 ready: model=%s, chunk=%d, action_dim=%d, transform=applied_in_sim (sim-side)",
-            model_id, self._action_chunk_size, self._action_dim,
+            model_id,
+            self._action_chunk_size,
+            self._action_dim,
         )
 
     def predict(self, obs: VLAObservation) -> list[list[float]]:

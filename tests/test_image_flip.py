@@ -9,18 +9,19 @@ Tests:
 6. _apply_image_transform(img, "none") is a no-op.
 7. LiberoBackend.get_info() includes image_transform="applied_in_sim" in obs_space.
 """
+
 from __future__ import annotations
 
 import sys
 import types
 import unittest
-from unittest.mock import MagicMock, patch
-import numpy as np
 
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # Test 1–2: LiberoBackend._extract_image and get_info
 # ---------------------------------------------------------------------------
+
 
 def _make_libero_backend():
     """Instantiate LiberoBackend without importing robosuite/LIBERO.
@@ -29,10 +30,14 @@ def _make_libero_backend():
     """
     # Provide minimal stubs so sim_worker imports cleanly without robosuite
     for mod in [
-        "robosuite", "robosuite.wrappers",
-        "libero", "libero.envs", "libero.envs.libero_envs",
+        "robosuite",
+        "robosuite.wrappers",
+        "libero",
+        "libero.envs",
+        "libero.envs.libero_envs",
         "libero.envs.bddl_base_domain",
-        "libero.libero", "libero.libero.benchmark",
+        "libero.libero",
+        "libero.libero.benchmark",
         "bddl",
     ]:
         if mod not in sys.modules:
@@ -54,6 +59,7 @@ def _make_libero_backend():
         envs_mod.OffScreenRenderEnv = object
 
     from sims.sim_worker import LiberoBackend
+
     return LiberoBackend
 
 
@@ -86,8 +92,9 @@ class TestLiberoBackendExtractImage(unittest.TestCase):
         raw_primary = np.asarray(obs["agentview_image"], dtype=np.uint8).copy()
         img, _wrist = self.backend._extract_image(obs)
         expected = raw_primary[::-1, ::-1]
-        np.testing.assert_array_equal(img, expected,
-            err_msg="_extract_image did not flip primary image")
+        np.testing.assert_array_equal(
+            img, expected, err_msg="_extract_image did not flip primary image"
+        )
 
     def test_wrist_flipped(self):
         """Wrist image must equal raw[::-1, ::-1]."""
@@ -95,8 +102,9 @@ class TestLiberoBackendExtractImage(unittest.TestCase):
         raw_wrist = np.asarray(obs["robot0_eye_in_hand_image"], dtype=np.uint8).copy()
         _primary, wrist_out = self.backend._extract_image(obs)
         expected = raw_wrist[::-1, ::-1]
-        np.testing.assert_array_equal(wrist_out, expected,
-            err_msg="_extract_image did not flip wrist image")
+        np.testing.assert_array_equal(
+            wrist_out, expected, err_msg="_extract_image did not flip wrist image"
+        )
 
     def test_flip_is_not_identity(self):
         """Sanity: a non-symmetric image should differ before/after flip."""
@@ -105,7 +113,7 @@ class TestLiberoBackendExtractImage(unittest.TestCase):
         img, _ = self.backend._extract_image(obs)
         self.assertFalse(
             np.array_equal(img, raw),
-            "Expected flipped image to differ from raw (input is not centro-symmetric)"
+            "Expected flipped image to differ from raw (input is not centro-symmetric)",
         )
 
     def test_no_wrist_returns_none(self):
@@ -125,8 +133,9 @@ class TestLiberoBackendExtractImage(unittest.TestCase):
         info = self.backend.get_info()
         transform = info.get("obs_space", {}).get("image_transform")
         self.assertEqual(
-            transform, "applied_in_sim",
-            f"Expected obs_space.image_transform='applied_in_sim', got {transform!r}"
+            transform,
+            "applied_in_sim",
+            f"Expected obs_space.image_transform='applied_in_sim', got {transform!r}",
         )
 
 
@@ -134,14 +143,16 @@ class TestLiberoBackendExtractImage(unittest.TestCase):
 # Test 3: Pi05Policy.get_info
 # ---------------------------------------------------------------------------
 
+
 class TestPi05PolicyGetInfo(unittest.TestCase):
     """Pi05Policy.get_info() must advertise image_transform='applied_in_sim'."""
 
     def _make_policy(self):
         from sims.vla_policies.pi05_policy import Pi05Policy
+
         policy = Pi05Policy.__new__(Pi05Policy)
         policy.model_id = "lerobot/pi05_libero_finetuned"
-        policy._image_transform = "flip_hw"   # detected model image transform
+        policy._image_transform = "flip_hw"  # detected model image transform
         policy._action_dim = 7
         policy._state_dim = 8
         policy._action_chunk_size = 50
@@ -152,8 +163,9 @@ class TestPi05PolicyGetInfo(unittest.TestCase):
         info = policy.get_info()
         transform = info["obs_requirements"]["image_transform"]
         self.assertEqual(
-            transform, "applied_in_sim",
-            f"Pi05Policy.get_info() should return 'applied_in_sim', got {transform!r}"
+            transform,
+            "applied_in_sim",
+            f"Pi05Policy.get_info() should return 'applied_in_sim', got {transform!r}",
         )
 
 
@@ -161,11 +173,13 @@ class TestPi05PolicyGetInfo(unittest.TestCase):
 # Test 4: SmolVLAPolicy.get_info
 # ---------------------------------------------------------------------------
 
+
 class TestSmolVLAPolicyGetInfo(unittest.TestCase):
     """SmolVLAPolicy.get_info() must advertise image_transform='applied_in_sim'."""
 
     def _make_policy(self):
         from sims.vla_policies.smolvla_policy import SmolVLAPolicy
+
         policy = SmolVLAPolicy.__new__(SmolVLAPolicy)
         policy.model_id = "HuggingFaceVLA/smolvla_libero"
         policy._image_transform = "flip_hw"
@@ -179,8 +193,9 @@ class TestSmolVLAPolicyGetInfo(unittest.TestCase):
         info = policy.get_info()
         transform = info["obs_requirements"]["image_transform"]
         self.assertEqual(
-            transform, "applied_in_sim",
-            f"SmolVLAPolicy.get_info() should return 'applied_in_sim', got {transform!r}"
+            transform,
+            "applied_in_sim",
+            f"SmolVLAPolicy.get_info() should return 'applied_in_sim', got {transform!r}",
         )
 
 
@@ -188,11 +203,13 @@ class TestSmolVLAPolicyGetInfo(unittest.TestCase):
 # Test 5: OpenVLAPolicy.get_info
 # ---------------------------------------------------------------------------
 
+
 class TestOpenVLAPolicyGetInfo(unittest.TestCase):
     """OpenVLAPolicy.get_info() must advertise image_transform='applied_in_sim'."""
 
     def _make_policy(self):
         from sims.vla_policies.openvla_policy import OpenVLAPolicy
+
         policy = OpenVLAPolicy.__new__(OpenVLAPolicy)
         policy.model_id = "openvla/openvla-7b-finetuned-libero-spatial"
         return policy
@@ -202,8 +219,9 @@ class TestOpenVLAPolicyGetInfo(unittest.TestCase):
         info = policy.get_info()
         transform = info["obs_requirements"]["image_transform"]
         self.assertEqual(
-            transform, "applied_in_sim",
-            f"OpenVLAPolicy.get_info() should return 'applied_in_sim', got {transform!r}"
+            transform,
+            "applied_in_sim",
+            f"OpenVLAPolicy.get_info() should return 'applied_in_sim', got {transform!r}",
         )
 
 
@@ -211,11 +229,13 @@ class TestOpenVLAPolicyGetInfo(unittest.TestCase):
 # Test 6–8: _apply_image_transform no-op cases
 # ---------------------------------------------------------------------------
 
+
 class TestApplyImageTransform(unittest.TestCase):
     """_apply_image_transform must treat 'applied_in_sim' and 'none' as no-ops."""
 
     def setUp(self):
         from PIL import Image as PILImage
+
         arr = np.arange(48, dtype=np.uint8).reshape(4, 4, 3)
         self.img = PILImage.fromarray(arr, mode="RGB")
         self.arr = arr.copy()
@@ -223,27 +243,31 @@ class TestApplyImageTransform(unittest.TestCase):
     def test_applied_in_sim_is_noop(self):
         """'applied_in_sim' must return the same image object unchanged."""
         from sims.env_wrapper import _apply_image_transform
+
         result = _apply_image_transform(self.img, "applied_in_sim")
         # Must be the identical object (no copy)
-        self.assertIs(result, self.img,
-            "_apply_image_transform('applied_in_sim') must return input unchanged")
+        self.assertIs(
+            result, self.img, "_apply_image_transform('applied_in_sim') must return input unchanged"
+        )
 
     def test_none_is_noop(self):
         """'none' must return the same image object unchanged."""
         from sims.env_wrapper import _apply_image_transform
+
         result = _apply_image_transform(self.img, "none")
         self.assertIs(result, self.img)
 
     def test_empty_string_is_noop(self):
         """Empty string must return the same image object unchanged."""
         from sims.env_wrapper import _apply_image_transform
+
         result = _apply_image_transform(self.img, "")
         self.assertIs(result, self.img)
 
     def test_flip_hw_actually_flips(self):
         """Sanity: 'flip_hw' must still produce a flipped image."""
-        from PIL import Image as PILImage
         from sims.env_wrapper import _apply_image_transform
+
         result = _apply_image_transform(self.img, "flip_hw")
         result_arr = np.array(result)
         expected = self.arr[::-1, ::-1]
@@ -252,6 +276,7 @@ class TestApplyImageTransform(unittest.TestCase):
     def test_unknown_transform_raises(self):
         """Unknown transform string must raise ValueError."""
         from sims.env_wrapper import _apply_image_transform
+
         with self.assertRaises(ValueError):
             _apply_image_transform(self.img, "magic_flip")
 
@@ -268,6 +293,7 @@ class TestLiberoInfinityFlipParity(unittest.TestCase):
     def setUp(self):
         LiberoBackend = _make_libero_backend()
         from sims.sim_worker import LiberoInfinityBackend
+
         self.libero = LiberoBackend.__new__(LiberoBackend)
         self.infinity = LiberoInfinityBackend.__new__(LiberoInfinityBackend)
 
@@ -284,16 +310,19 @@ class TestLiberoInfinityFlipParity(unittest.TestCase):
         libero_primary, libero_wrist = self.libero._extract_image(obs)
         inf_primary, inf_wrist = self.infinity._extract_images(obs)
         np.testing.assert_array_equal(
-            inf_primary, libero_primary,
-            err_msg="LiberoInfinity primary image flip diverges from LiberoBackend"
+            inf_primary,
+            libero_primary,
+            err_msg="LiberoInfinity primary image flip diverges from LiberoBackend",
         )
         np.testing.assert_array_equal(
-            inf_wrist, libero_wrist,
-            err_msg="LiberoInfinity wrist image flip diverges from LiberoBackend"
+            inf_wrist,
+            libero_wrist,
+            err_msg="LiberoInfinity wrist image flip diverges from LiberoBackend",
         )
 
     def test_get_info_advertises_applied_in_sim(self):
         from sims.sim_worker import LiberoInfinityBackend
+
         backend = LiberoInfinityBackend.__new__(LiberoInfinityBackend)
         backend._camera_resolution = 256
         backend._max_steps = 280

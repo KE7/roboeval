@@ -11,17 +11,16 @@ Covers:
 Tests use mocked policy-loading paths to avoid model downloads and hardware
 dependencies.
 """
+
 from __future__ import annotations
 
 import base64
-import io
 import importlib
+import io
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 from PIL import Image
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -154,7 +153,7 @@ class TestActionObsSpec:
     def test_action_spec_serialisable(self):
         """All ActionObsSpec values must be serialisable via .to_dict()."""
         server = _make_mock_policy()
-        for key, spec in server.get_action_spec().items():
+        for spec in server.get_action_spec().values():
             d = spec.to_dict()
             assert d["name"]
             assert isinstance(d["dims"], int)
@@ -210,7 +209,7 @@ class TestGetInfo:
 class TestImportAndNamespace:
     def test_accessible_via_sims_vla_policies(self):
         """The policy is registered in the sims.vla_policies package namespace."""
-        import sims.vla_policies.diffusion_policy_policy as dp_module  # noqa: F401
+        import sims.vla_policies.diffusion_policy_policy as dp_module
 
     def test_main_function_exists(self):
         from sims.vla_policies.diffusion_policy_policy import main
@@ -230,8 +229,6 @@ class TestImportAndNamespace:
 
 def _make_torch_mock(action_dim: int = 2):
     """Return a mock torch module that produces zero tensors for predict()."""
-    import sys
-    import types
 
     torch_mock = MagicMock()
 
@@ -245,7 +242,9 @@ def _make_torch_mock(action_dim: int = 2):
 
     torch_mock.tensor.side_effect = _tensor
 
-    torch_mock.no_grad.return_value = MagicMock(__enter__=lambda s: None, __exit__=lambda s, *a: None)
+    torch_mock.no_grad.return_value = MagicMock(
+        __enter__=lambda s: None, __exit__=lambda s, *a: None
+    )
 
     return torch_mock
 
@@ -269,7 +268,6 @@ class TestPredictSmoke:
     def _run_predict(self, server, obs):
         """Run predict() with torch + torchvision + PIL mocked out."""
         import sys
-        import types
 
         pil_img_mock = MagicMock()
         pil_img_mock.convert.return_value = pil_img_mock
@@ -303,7 +301,6 @@ class TestPredictSmoke:
         torch_mock.no_grad.return_value.__enter__ = lambda s: None
         torch_mock.no_grad.return_value.__exit__ = lambda s, *a: None
 
-        mod_name = "sims.vla_policies.diffusion_policy_policy"
         with (
             patch.dict(
                 sys.modules,

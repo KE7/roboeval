@@ -30,22 +30,11 @@ The server exposes four HTTP endpoints automatically via ``make_app()``:
 
 See docs/extending.md for the full walkthrough and pitfall list.
 """
+
 from __future__ import annotations
 
 import argparse
-import base64
 import logging
-from io import BytesIO
-from typing import Any
-
-import numpy as np
-
-# ── Framework imports ─────────────────────────────────────────────────────────
-# VLAPolicyBase: abstract class that wires your three methods to HTTP endpoints.
-# make_app():    FastAPI factory — wraps your policy in the standard 4-endpoint app.
-from sims.vla_policies.base import VLAPolicyBase, make_app
-# VLAObservation: the observation payload your predict() receives.
-from sims.vla_policies.vla_schema import VLAObservation
 
 # ── ActionObsSpec (optional but recommended) ───────────────────────────────────────
 # Declaring typed specs lets the orchestrator validate VLA × sim compatibility
@@ -54,17 +43,15 @@ from sims.vla_policies.vla_schema import VLAObservation
 # for anything else.  Import only what you need.
 from robo_eval.specs import (
     ActionObsSpec,
-    POSITION_DELTA,       # 3-dim delta_xyz, range [-1, 1]
-    POSITION_ABS,         # 3-dim absolute_xyz (no range constraint)
-    ROTATION_AA,          # 3-dim axis_angle, range [-π, π]
-    ROTATION_EULER,       # 3-dim euler_xyz, range [-π, π]
-    ROTATION_QUAT,        # 4-dim quaternion_xyzw, range [-1, 1]
-    GRIPPER_CLOSE_NEG,    # 1-dim binary: -1 = close, +1 = open  (LIBERO convention)
-    GRIPPER_CLOSE_POS,    # 1-dim binary: +1 = close, -1 = open  (RLDS convention)
-    GRIPPER_01,           # 1-dim continuous [0, 1]
-    IMAGE_RGB,            # 0-dim (non-array) rgb_hwc_uint8 image
-    LANGUAGE,             # 0-dim (non-array) language string
 )
+
+# ── Framework imports ─────────────────────────────────────────────────────────
+# VLAPolicyBase: abstract class that wires your three methods to HTTP endpoints.
+# make_app():    FastAPI factory — wraps your policy in the standard 4-endpoint app.
+from sims.vla_policies.base import VLAPolicyBase, make_app
+
+# VLAObservation: the observation payload your predict() receives.
+from sims.vla_policies.vla_schema import VLAObservation
 
 logger = logging.getLogger(__name__)
 
@@ -209,19 +196,19 @@ class MyModelPolicy(VLAPolicyBase):
         TODO [STEP 5]: fill in the correct values for your model.
         """
         return {
-            "name": "my-model",           # TODO: short display name
+            "name": "my-model",  # TODO: short display name
             "model_id": self.model_id,
             "action_space": {
-                "type": "eef_delta",      # TODO: or "joint_pos", "eef_absolute", …
-                "dim": 7,                 # TODO: your model's output dimensionality
+                "type": "eef_delta",  # TODO: or "joint_pos", "eef_absolute", …
+                "dim": 7,  # TODO: your model's output dimensionality
                 "description": "EEF delta: [dx,dy,dz,droll,dpitch,dyaw,gripper]",  # TODO
             },
-            "state_dim": 8,               # TODO: 0 if your model ignores proprioceptive state
-            "action_chunk_size": 1,       # TODO: actions per /predict call (1 for single-step)
+            "state_dim": 8,  # TODO: 0 if your model ignores proprioceptive state
+            "action_chunk_size": 1,  # TODO: actions per /predict call (1 for single-step)
             "obs_requirements": {
-                "cameras": ["primary"],   # TODO: add "wrist" or "secondary" if needed
-                "state_dim": 8,           # TODO: match state_dim above
-                "image_resolution": [256, 256],   # TODO: what the sim should render
+                "cameras": ["primary"],  # TODO: add "wrist" or "secondary" if needed
+                "state_dim": 8,  # TODO: match state_dim above
+                "image_resolution": [256, 256],  # TODO: what the sim should render
                 # CRITICAL: image_transform declaration.
                 # "applied_in_sim": the 180° LIBERO flip is done by the sim backend,
                 #                   env_wrapper must NOT apply a second flip.
@@ -298,13 +285,19 @@ def main():
     import uvicorn
 
     parser = argparse.ArgumentParser(description="My Model VLA Policy Server")
-    parser.add_argument("--model-id", default=_MODEL_ID_DEFAULT,
-                        help="HuggingFace repo or local path to the model.")
-    parser.add_argument("--port",   type=int, default=5106,  # TODO: pick a unique port
-                        help="Port to serve on.")
-    parser.add_argument("--host",   default="0.0.0.0")
-    parser.add_argument("--device", default="cuda",
-                        help="Torch device string (cuda, cpu, cuda:1, …).")
+    parser.add_argument(
+        "--model-id", default=_MODEL_ID_DEFAULT, help="HuggingFace repo or local path to the model."
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=5106,  # TODO: pick a unique port
+        help="Port to serve on.",
+    )
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument(
+        "--device", default="cuda", help="Torch device string (cuda, cpu, cuda:1, …)."
+    )
     # TODO: add model-specific CLI args here, e.g.:
     # parser.add_argument("--unnorm-key", dest="unnorm_key", default="libero_spatial")
     args = parser.parse_args()

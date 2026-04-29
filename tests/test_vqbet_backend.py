@@ -10,6 +10,7 @@ server_runner / config registration.
 
 All tests are offline (no GPU, no HuggingFace download).
 """
+
 from __future__ import annotations
 
 import importlib
@@ -129,16 +130,16 @@ class TestParityWithDiffusionPolicy:
     """
 
     def test_action_spec_matches_diffusion_policy_keys(self):
-        from sims.vla_policies.vqbet_policy import VQBeTPolicyServer
         from sims.vla_policies.diffusion_policy_policy import DiffusionPolicyServer
+        from sims.vla_policies.vqbet_policy import VQBeTPolicyServer
 
         vq = VQBeTPolicyServer().get_action_spec()
         dp = DiffusionPolicyServer().get_action_spec()
         assert set(vq.keys()) == set(dp.keys())
 
     def test_observation_spec_matches_diffusion_policy_keys(self):
-        from sims.vla_policies.vqbet_policy import VQBeTPolicyServer
         from sims.vla_policies.diffusion_policy_policy import DiffusionPolicyServer
+        from sims.vla_policies.vqbet_policy import VQBeTPolicyServer
 
         vq = VQBeTPolicyServer().get_observation_spec()
         dp = DiffusionPolicyServer().get_observation_spec()

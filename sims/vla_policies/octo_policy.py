@@ -30,6 +30,7 @@ Usage:
 
 Default checkpoint: rail-berkeley/octo-small-1.5
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,15 +40,16 @@ import os
 from io import BytesIO
 
 import numpy as np
-from sims.vla_policies.base import VLAPolicyBase, make_app
-from sims.vla_policies.vla_schema import VLAObservation
-from robo_eval.specs import (
-    ActionObsSpec,
-    POSITION_DELTA,
+
+from roboeval.specs import (
     GRIPPER_CLOSE_NEG,
     IMAGE_RGB,
     LANGUAGE,
+    POSITION_DELTA,
+    ActionObsSpec,
 )
+from sims.vla_policies.base import VLAPolicyBase, make_app
+from sims.vla_policies.vla_schema import VLAObservation
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +99,8 @@ class OctoPolicy(VLAPolicyBase):
         # JAX device selection: GPU if available, else CPU.
         # We do NOT set CUDA_VISIBLE_DEVICES here — the caller is responsible.
         try:
-            import jax  # noqa: F401
-        except ImportError as exc:
+            import jax
+        except ImportError:
             self.load_error = (
                 "jax not installed — run: pip install jax jaxlib  "
                 "(CPU) or  pip install 'jax[cuda12]'  (GPU, aarch64+x86)"
@@ -108,10 +110,9 @@ class OctoPolicy(VLAPolicyBase):
 
         try:
             from octo.model.octo_model import OctoModel  # type: ignore[import]
-        except ImportError as exc:
+        except ImportError:
             self.load_error = (
-                "octo not installed — run: "
-                "pip install git+https://github.com/octo-models/octo"
+                "octo not installed — run: pip install git+https://github.com/octo-models/octo"
             )
             logger.error("Octo load failed: %s", self.load_error)
             return
@@ -130,7 +131,7 @@ class OctoPolicy(VLAPolicyBase):
             return
 
         import jax
-        import jax.numpy as jnp  # noqa: F401
+        import jax.numpy as jnp
 
         self._rng = jax.random.PRNGKey(0)
         self._history = []
@@ -149,6 +150,7 @@ class OctoPolicy(VLAPolicyBase):
         self._history = []
         if self._rng is not None:
             import jax
+
             # Advance RNG each episode so actions are not deterministically identical.
             self._rng, _ = jax.random.split(self._rng)
 
@@ -224,7 +226,7 @@ class OctoPolicy(VLAPolicyBase):
                 "dim": _ACTION_DIM,
                 "description": "EEF delta: [dx,dy,dz,droll,dpitch,dyaw,gripper]",
             },
-            "state_dim": 0,          # Octo does not consume robot state
+            "state_dim": 0,  # Octo does not consume robot state
             "action_chunk_size": 1,  # single step per call (pred_horizon[0])
             "obs_requirements": {
                 "cameras": ["primary"],

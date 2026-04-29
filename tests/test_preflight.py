@@ -1,4 +1,4 @@
-"""Unit tests for robo_eval.preflight.
+"""Unit tests for roboeval.preflight.
 
 Tests:
     - validate_yaml: YAML parse, config load, ActionObsSpec round-trip
@@ -9,13 +9,9 @@ Tests:
 
 from __future__ import annotations
 
-import json
 import sys
-import threading
-import time
 from pathlib import Path
-from typing import Any
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -23,16 +19,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from robo_eval.preflight import (
-    validate_yaml,
-    check_server,
-    check_benchmark,
+from roboeval.preflight import (  # tests adjust sys.path before importing local package.
     PreflightConfig,
     _check,
+    check_benchmark,
+    check_server,
     print_results,
     run_preflight,
+    validate_yaml,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures: stubbed server responses
@@ -59,7 +54,6 @@ def _make_requests_mock(responses: dict[str, dict]):
     """Return a mock requests module where get/post return the given responses."""
 
     def fake_get(url, **kwargs):
-        path = url.split("localhost")[1].lstrip("0123456789").lstrip(":").lstrip("/")
         # Extract the path suffix (/health, /info, etc.)
         for suffix, resp_data in responses.items():
             if url.endswith(suffix):
@@ -115,7 +109,7 @@ no_vlm: true
         assert any(not r.ok for r in results)
 
     def test_benchmark_registry_resolves(self, tmp_path):
-        yaml_content = "name: test\nbenchmark: 'robo_eval.specs:ActionObsSpec'\n"
+        yaml_content = "name: test\nbenchmark: 'roboeval.specs:ActionObsSpec'\n"
         p = tmp_path / "bench.yaml"
         p.write_text(yaml_content)
         results = validate_yaml(p)
@@ -152,16 +146,14 @@ class TestCheckServer:
             "/health": {"ready": True, "status": "ok"},
             "/info": {
                 "name": "pi05",
-                "action_spec": {
-                    "position": {"name": "position", "dims": 3, "format": "delta_xyz"}
-                },
+                "action_spec": {"position": {"name": "position", "dims": 3, "format": "delta_xyz"}},
                 "observation_spec": {
                     "primary": {"name": "primary", "dims": 0, "format": "image_rgb_hwc_uint8"}
                 },
             },
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             results = check_server(server)
 
         checks = {r.name: r for r in results}
@@ -175,7 +167,7 @@ class TestCheckServer:
             "/health": ConnectionError("refused"),
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             results = check_server(server)
 
         checks = {r.name: r for r in results}
@@ -189,7 +181,7 @@ class TestCheckServer:
             "/health": {"ready": False},
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             results = check_server(server)
 
         checks = {r.name: r for r in results}
@@ -204,7 +196,7 @@ class TestCheckServer:
             "/info": {"name": "legacy_model", "action_chunk_size": 50},
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             results = check_server(server)
 
         checks = {r.name: r for r in results}
@@ -215,14 +207,10 @@ class TestCheckServer:
         server = {"url": "http://localhost:9999", "name": "bad_spec_vla"}
         responses = {
             "/health": {"ready": True},
-            "/info": {
-                "action_spec": {
-                    "position": {"not_a_valid_spec": True}
-                }
-            },
+            "/info": {"action_spec": {"position": {"not_a_valid_spec": True}}},
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             results = check_server(server)
 
         checks = {r.name: r for r in results}
@@ -244,7 +232,7 @@ class TestCheckBenchmark:
             "/step": {"obs": {}, "success": False, "done": False},
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             results = check_benchmark(sim)
 
         checks = {r.name: r for r in results}
@@ -259,7 +247,7 @@ class TestCheckBenchmark:
             "/health": Exception("refused"),
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             results = check_benchmark(sim)
 
         checks = {r.name: r for r in results}
@@ -274,7 +262,7 @@ class TestCheckBenchmark:
             "/reset": Exception("sim crashed"),
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             results = check_benchmark(sim)
 
         checks = {r.name: r for r in results}
@@ -364,7 +352,7 @@ class TestRunPreflightIntegration:
             "/info": {"name": "pi05"},
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             rc = run_preflight(p, validate=False, server=True, benchmark=False)
         assert rc == 0
 
@@ -380,7 +368,7 @@ class TestRunPreflightIntegration:
             "/step": {"obs": {}, "success": False},
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             rc = run_preflight(p, validate=False, server=False, benchmark=True)
         assert rc == 0
 
@@ -393,7 +381,7 @@ class TestRunPreflightIntegration:
             "/health": Exception("Connection refused"),
         }
         mock_requests = _make_requests_mock(responses)
-        with patch("robo_eval.preflight.requests", mock_requests):
+        with patch("roboeval.preflight.requests", mock_requests):
             rc = run_preflight(p, validate=False, server=True, benchmark=False)
         assert rc != 0
 
@@ -423,13 +411,18 @@ output_dir: {}
         # Mock the orchestrator run to keep this test self-contained.
         mock_orch_result = {
             "benchmark": "all_test",
-            "tasks": [{"task": "task_0", "episodes": [
-                {"episode_id": 0, "metrics": {"success": True}, "steps": 50}
-            ], "num_episodes": 1, "avg_steps": 50.0}],
+            "tasks": [
+                {
+                    "task": "task_0",
+                    "episodes": [{"episode_id": 0, "metrics": {"success": True}, "steps": 50}],
+                    "num_episodes": 1,
+                    "avg_steps": 50.0,
+                }
+            ],
             "mean_success": 1.0,
         }
-        with patch("robo_eval.preflight.requests", mock_requests):
-            with patch("robo_eval.preflight.Orchestrator") as MockOrch:
+        with patch("roboeval.preflight.requests", mock_requests):
+            with patch("roboeval.preflight.Orchestrator") as MockOrch:
                 instance = MockOrch.return_value
                 instance.run.return_value = mock_orch_result
                 rc = run_preflight(

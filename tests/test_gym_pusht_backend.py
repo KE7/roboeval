@@ -17,11 +17,11 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Module-level stubs — inserted before importing sims.sim_worker so that
 # GymPushTBackend can be imported without the real packages.
 # ---------------------------------------------------------------------------
+
 
 def _inject_stubs() -> None:
     """Inject lightweight module stubs for gymnasium and gym_pusht."""
@@ -39,6 +39,7 @@ _inject_stubs()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_fake_env(reward: float = 0.5) -> MagicMock:
     """Return a MagicMock that behaves like a gym-pusht environment."""
@@ -72,6 +73,7 @@ def _make_backend(reward: float = 0.5):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def backend():
     """GymPushTBackend with a MagicMock environment."""
@@ -82,26 +84,31 @@ def backend():
 # Task resolution
 # ---------------------------------------------------------------------------
 
+
 def test_resolve_task_by_full_id():
     from sims.sim_worker import GymPushTBackend
+
     b = GymPushTBackend()
     assert b._resolve_task("gym_pusht/PushT-v0") == "gym_pusht/PushT-v0"
 
 
 def test_resolve_task_by_index_zero():
     from sims.sim_worker import GymPushTBackend
+
     b = GymPushTBackend()
     assert b._resolve_task("0") == "gym_pusht/PushT-v0"
 
 
 def test_resolve_task_by_short_alias():
     from sims.sim_worker import GymPushTBackend
+
     b = GymPushTBackend()
     assert b._resolve_task("pusht") == "gym_pusht/PushT-v0"
 
 
 def test_resolve_task_bad_index():
     from sims.sim_worker import GymPushTBackend
+
     b = GymPushTBackend()
     with pytest.raises(ValueError, match="only has task index 0"):
         b._resolve_task("5")
@@ -109,6 +116,7 @@ def test_resolve_task_bad_index():
 
 def test_resolve_task_unknown_name():
     from sims.sim_worker import GymPushTBackend
+
     b = GymPushTBackend()
     with pytest.raises(ValueError, match="not recognised"):
         b._resolve_task("CubeGrasp-v99")
@@ -117,6 +125,7 @@ def test_resolve_task_unknown_name():
 # ---------------------------------------------------------------------------
 # Init (stubbed via sys.modules)
 # ---------------------------------------------------------------------------
+
 
 def test_init_sets_task_id():
     """init() must store the resolved gymnasium task id."""
@@ -148,6 +157,7 @@ def test_init_task_description_by_index():
 # Reset
 # ---------------------------------------------------------------------------
 
+
 def test_reset_returns_image_tuple(backend):
     b, _ = backend
     img, img2 = b.reset(episode_index=0)
@@ -172,6 +182,7 @@ def test_reset_resets_reward(backend):
 # ---------------------------------------------------------------------------
 # Step
 # ---------------------------------------------------------------------------
+
 
 def test_step_returns_correct_structure(backend):
     b, _ = backend
@@ -226,6 +237,7 @@ def test_step_default_reward_is_not_success(backend):
 # check_success
 # ---------------------------------------------------------------------------
 
+
 def test_check_success_false_by_default(backend):
     b, _ = backend
     b.reset()
@@ -241,6 +253,7 @@ def test_check_success_true_after_high_reward(backend):
 # ---------------------------------------------------------------------------
 # get_info
 # ---------------------------------------------------------------------------
+
 
 def test_get_info_action_space(backend):
     b, _ = backend
@@ -266,6 +279,7 @@ def test_get_info_delta_actions_false(backend):
 # _extract_image
 # ---------------------------------------------------------------------------
 
+
 def test_extract_image_from_dict(backend):
     b, _ = backend
     obs = {"pixels": np.full((96, 96, 3), 42, dtype=np.uint8)}
@@ -285,6 +299,7 @@ def test_extract_image_none_returns_zeros(backend):
 # _extract_state
 # ---------------------------------------------------------------------------
 
+
 def test_extract_state_returns_two_floats(backend):
     b, _ = backend
     obs = {"agent_pos": np.array([0.3, 0.7], dtype=np.float32)}
@@ -303,6 +318,7 @@ def test_extract_state_none_returns_zeros(backend):
 # close
 # ---------------------------------------------------------------------------
 
+
 def test_close_sets_env_none(backend):
     b, fake_env = backend
     b.close()
@@ -319,6 +335,7 @@ def test_close_idempotent(backend):
 # ---------------------------------------------------------------------------
 # BACKENDS registry
 # ---------------------------------------------------------------------------
+
 
 def test_gym_pusht_in_backends():
     from sims.sim_worker import BACKENDS, GymPushTBackend

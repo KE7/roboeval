@@ -3,20 +3,20 @@
 VLA and sim action spaces must match exactly by type and dimension, with no
 padding, truncation, or translation.
 """
+
 import numpy as np
 import pytest
 from PIL import Image
 
 from sims.env_wrapper import SimWrapper, _apply_image_transform
 
-
 # ---- Helper: construct a minimal SimWrapper-like object for method tests ----
+
 
 class _StubWrapper:
     """Minimal stub with the attributes that negotiation methods read."""
 
-    def __init__(self, policy_action_space, sim_action_space,
-                 policy_info=None, sim_info=None):
+    def __init__(self, policy_action_space, sim_action_space, policy_info=None, sim_info=None):
         self._policy_action_space = policy_action_space
         self._sim_action_space = sim_action_space
         self._policy_info = policy_info or {}
@@ -28,8 +28,8 @@ class _StubWrapper:
 # _negotiate_spaces: strict identity matching
 # ==========================================================================
 
-class TestNegotiateSpaces:
 
+class TestNegotiateSpaces:
     def test_identity_eef_delta_7(self):
         """Matching type + dim passes without error."""
         w = _StubWrapper(
@@ -79,8 +79,8 @@ class TestNegotiateSpaces:
 # _negotiate_obs: camera and state checks
 # ==========================================================================
 
-class TestNegotiateObs:
 
+class TestNegotiateObs:
     def test_no_obs_requirements_skips(self):
         """VLA without obs_requirements skips negotiation."""
         w = _StubWrapper(
@@ -97,14 +97,18 @@ class TestNegotiateObs:
         w = _StubWrapper(
             policy_action_space={"type": "eef_delta", "dim": 7},
             sim_action_space={"type": "eef_delta", "dim": 7},
-            policy_info={"obs_requirements": {
-                "cameras": ["primary", "wrist"],
-                "state_dim": 8,
-            }},
-            sim_info={"obs_space": {
-                "cameras": [{"role": "primary"}, {"role": "wrist"}],
-                "state": {"dim": 8},
-            }},
+            policy_info={
+                "obs_requirements": {
+                    "cameras": ["primary", "wrist"],
+                    "state_dim": 8,
+                }
+            },
+            sim_info={
+                "obs_space": {
+                    "cameras": [{"role": "primary"}, {"role": "wrist"}],
+                    "state": {"dim": 8},
+                }
+            },
         )
         SimWrapper._negotiate_obs(w)
 
@@ -113,14 +117,18 @@ class TestNegotiateObs:
         w = _StubWrapper(
             policy_action_space={"type": "eef_delta", "dim": 7},
             sim_action_space={"type": "eef_delta", "dim": 7},
-            policy_info={"obs_requirements": {
-                "cameras": ["primary", "wrist"],
-                "state_dim": 0,
-            }},
-            sim_info={"obs_space": {
-                "cameras": [{"role": "primary"}],
-                "state": {"dim": 0},
-            }},
+            policy_info={
+                "obs_requirements": {
+                    "cameras": ["primary", "wrist"],
+                    "state_dim": 0,
+                }
+            },
+            sim_info={
+                "obs_space": {
+                    "cameras": [{"role": "primary"}],
+                    "state": {"dim": 0},
+                }
+            },
         )
         with pytest.raises(ValueError, match="Camera mismatch"):
             SimWrapper._negotiate_obs(w)
@@ -130,14 +138,18 @@ class TestNegotiateObs:
         w = _StubWrapper(
             policy_action_space={"type": "eef_delta", "dim": 7},
             sim_action_space={"type": "eef_delta", "dim": 7},
-            policy_info={"obs_requirements": {
-                "cameras": ["primary"],
-                "state_dim": 8,
-            }},
-            sim_info={"obs_space": {
-                "cameras": [{"role": "primary"}],
-                "state": {"dim": 14},
-            }},
+            policy_info={
+                "obs_requirements": {
+                    "cameras": ["primary"],
+                    "state_dim": 8,
+                }
+            },
+            sim_info={
+                "obs_space": {
+                    "cameras": [{"role": "primary"}],
+                    "state": {"dim": 14},
+                }
+            },
         )
         with pytest.raises(ValueError, match="State dim mismatch"):
             SimWrapper._negotiate_obs(w)
@@ -147,14 +159,18 @@ class TestNegotiateObs:
         w = _StubWrapper(
             policy_action_space={"type": "eef_delta", "dim": 7},
             sim_action_space={"type": "eef_delta", "dim": 7},
-            policy_info={"obs_requirements": {
-                "cameras": ["primary"],
-                "state_dim": 8,
-            }},
-            sim_info={"obs_space": {
-                "cameras": [{"role": "primary"}],
-                "state": {"dim": 0},
-            }},
+            policy_info={
+                "obs_requirements": {
+                    "cameras": ["primary"],
+                    "state_dim": 8,
+                }
+            },
+            sim_info={
+                "obs_space": {
+                    "cameras": [{"role": "primary"}],
+                    "state": {"dim": 0},
+                }
+            },
         )
         with pytest.raises(ValueError, match="State mismatch"):
             SimWrapper._negotiate_obs(w)
@@ -164,14 +180,18 @@ class TestNegotiateObs:
         w = _StubWrapper(
             policy_action_space={"type": "eef_delta", "dim": 7},
             sim_action_space={"type": "eef_delta", "dim": 7},
-            policy_info={"obs_requirements": {
-                "cameras": ["primary"],
-                "state_dim": 0,
-            }},
-            sim_info={"obs_space": {
-                "cameras": [{"role": "primary"}],
-                "state": {"dim": 8},
-            }},
+            policy_info={
+                "obs_requirements": {
+                    "cameras": ["primary"],
+                    "state_dim": 0,
+                }
+            },
+            sim_info={
+                "obs_space": {
+                    "cameras": [{"role": "primary"}],
+                    "state": {"dim": 8},
+                }
+            },
         )
         SimWrapper._negotiate_obs(w)
 
@@ -180,15 +200,19 @@ class TestNegotiateObs:
         w = _StubWrapper(
             policy_action_space={"type": "eef_delta", "dim": 7},
             sim_action_space={"type": "eef_delta", "dim": 7},
-            policy_info={"obs_requirements": {
-                "cameras": ["primary"],
-                "state_dim": 0,
-                "image_transform": "flip_hw",
-            }},
-            sim_info={"obs_space": {
-                "cameras": [{"role": "primary"}],
-                "state": {"dim": 0},
-            }},
+            policy_info={
+                "obs_requirements": {
+                    "cameras": ["primary"],
+                    "state_dim": 0,
+                    "image_transform": "flip_hw",
+                }
+            },
+            sim_info={
+                "obs_space": {
+                    "cameras": [{"role": "primary"}],
+                    "state": {"dim": 0},
+                }
+            },
         )
         SimWrapper._negotiate_obs(w)
         assert w._image_transform == "flip_hw"
@@ -198,8 +222,8 @@ class TestNegotiateObs:
 # _apply_image_transform
 # ==========================================================================
 
-class TestImageTransform:
 
+class TestImageTransform:
     def _make_gradient_image(self):
         """Create a small gradient image for transform testing."""
         arr = np.arange(48, dtype=np.uint8).reshape(4, 4, 3)

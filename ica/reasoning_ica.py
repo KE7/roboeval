@@ -1,9 +1,9 @@
 import os
+
 from PIL import Image
 
 
 class GenericICADir:
-
     def __init__(self, dir_path):
         self.dir_path = dir_path
 
@@ -13,7 +13,7 @@ class GenericICADir:
 
     def read_text(self, path):
         if path and os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return f.read()
         return None
 
@@ -95,15 +95,26 @@ class ReasoningICADir(GenericICADir):
         self.reasoning_path = self._find_file("reasoning.txt")
 
     def get_reasoning_tuple(self):
-        if not (self.image0_path and self.task_path and self.success_path
-                and self.whathappened_path and self.reasoning_path):
+        if not (
+            self.image0_path
+            and self.task_path
+            and self.success_path
+            and self.whathappened_path
+            and self.reasoning_path
+        ):
             return None
         image0 = Image.open(self.image0_path)
         reasoning = self.read_text(self.reasoning_path)
         whathappened = self.read_text(self.whathappened_path)
         success = self.load_success()
         task = self.read_text(self.task_path)
-        if image0 is None or task is None or success is None or whathappened is None or reasoning is None:
+        if (
+            image0 is None
+            or task is None
+            or success is None
+            or whathappened is None
+            or reasoning is None
+        ):
             return None
         return {
             "image0": image0,

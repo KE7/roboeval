@@ -1171,18 +1171,7 @@ class RoboTwinBackend(SimBackendBase):
                 str(pathlib.Path.home() / ".local" / "share" / "roboeval" / "vendors"),
             )
         ).resolve()
-        robotwin_path = _vendors_base / "RoboTwin"
-        if not robotwin_path.exists():
-            for entry in sys.path:
-                candidate = pathlib.Path(entry)
-                if (
-                    (candidate / "envs").is_dir()
-                    and (candidate / "task_config" / "demo_clean.yml").is_file()
-                ):
-                    robotwin_path = candidate.resolve()
-                    break
-
-        robotwin_dir = str(robotwin_path)
+        robotwin_dir = str(_vendors_base / "RoboTwin")
         os.chdir(robotwin_dir)
         if robotwin_dir not in sys.path:
             sys.path.insert(0, robotwin_dir)

@@ -18,6 +18,7 @@ Usage:
 
 Uses lerobot's make_pre_post_processors for preprocessing and postprocessing.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,15 +27,16 @@ import logging
 from io import BytesIO
 
 import numpy as np
-from sims.vla_policies.base import VLAPolicyBase, detect_lerobot_image_transform, make_app
-from sims.vla_policies.vla_schema import VLAObservation
-from robo_eval.specs import (
-    ActionObsSpec,
-    POSITION_DELTA,
+
+from roboeval.specs import (
     GRIPPER_CLOSE_NEG,
     IMAGE_RGB,
     LANGUAGE,
+    POSITION_DELTA,
+    ActionObsSpec,
 )
+from sims.vla_policies.base import VLAPolicyBase, detect_lerobot_image_transform, make_app
+from sims.vla_policies.vla_schema import VLAObservation
 
 logger = logging.getLogger(__name__)
 _MODEL_ID_DEFAULT = "HuggingFaceVLA/smolvla_libero"
@@ -96,8 +98,10 @@ class SmolVLAPolicy(VLAPolicyBase):
         self.ready = True
         logger.info(
             "SmolVLA ready: model=%s, n_action_steps=%d, chunk_size=%d, transform=%s",
-            model_id, self._action_chunk_size,
-            getattr(cfg, "chunk_size", 50), self._image_transform,
+            model_id,
+            self._action_chunk_size,
+            getattr(cfg, "chunk_size", 50),
+            self._image_transform,
         )
 
     def predict(self, obs: VLAObservation) -> list[list[float]]:
@@ -148,7 +152,7 @@ class SmolVLAPolicy(VLAPolicyBase):
 
         to_tensor = transforms.ToTensor()
 
-        def decode(b64: str) -> "torch.Tensor":
+        def decode(b64: str) -> torch.Tensor:
             return to_tensor(Image.open(BytesIO(base64.b64decode(b64))).convert("RGB"))
 
         # Step 1: build and preprocess each frame independently
@@ -157,7 +161,9 @@ class SmolVLAPolicy(VLAPolicyBase):
             state_list = obs.state.get("flat") or [0.0] * self._state_dim
             frame: dict = {
                 self._camera_key: decode(obs.images["primary"]),
-                "observation.state": torch.tensor(state_list, dtype=torch.float32)[: self._state_dim],
+                "observation.state": torch.tensor(state_list, dtype=torch.float32)[
+                    : self._state_dim
+                ],
                 "task": obs.instruction,
             }
             if obs.images.get("wrist") and self._camera_key2:
@@ -169,7 +175,7 @@ class SmolVLAPolicy(VLAPolicyBase):
         # Variable-length sequences (e.g. tokenised instructions of different lengths)
         # must be padded to the same length before concatenation.  We right-pad with 0
         # (attention_mask: 0 = masked; input_ids: 0 = pad_token_id in most tokenizers).
-        def _cat_or_pad(tensors: list) -> "torch.Tensor":
+        def _cat_or_pad(tensors: list) -> torch.Tensor:
             """Concatenate tensors along dim 0, padding if they differ in other dims."""
             if not tensors:
                 return torch.empty(0)
@@ -185,6 +191,7 @@ class SmolVLAPolicy(VLAPolicyBase):
                     pad_spec += [0, max_shape[d] - t.shape[d]]
                 if any(p != 0 for p in pad_spec):
                     import torch.nn.functional as F
+
                     t = F.pad(t, pad_spec, value=0)
                 padded.append(t)
             return torch.cat(padded, dim=0)
@@ -282,11 +289,17 @@ def main():
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
-        "--max-batch-size", type=int, default=8, dest="max_batch_size",
+        "--max-batch-size",
+        type=int,
+        default=8,
+        dest="max_batch_size",
         help="Max requests per GPU batch (default 8; set 1 to disable batching)",
     )
     parser.add_argument(
-        "--max-wait-ms", type=float, default=15.0, dest="max_wait_ms",
+        "--max-wait-ms",
+        type=float,
+        default=15.0,
+        dest="max_wait_ms",
         help="Max milliseconds to wait before dispatching a partial batch (default 15.0)",
     )
     args = parser.parse_args()
@@ -302,7 +315,9 @@ def main():
     )
     logging.basicConfig(level=logging.INFO)
     print(f"[smolvla_policy] Starting on {args.host}:{args.port} model={args.model_id}")
-    print(f"[smolvla_policy] Batching: max_batch_size={args.max_batch_size}, max_wait_ms={args.max_wait_ms}")
+    print(
+        f"[smolvla_policy] Batching: max_batch_size={args.max_batch_size}, max_wait_ms={args.max_wait_ms}"
+    )
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

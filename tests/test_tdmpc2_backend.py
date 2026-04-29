@@ -14,9 +14,10 @@ These tests run without GPU / lerobot / tdmpc2 actually installed.  They verify:
 6.  Spec contract: ``get_action_spec()`` and ``get_observation_spec()`` entries
     are ``ActionObsSpec`` instances (not raw dicts).
 7.  Module-level constants and CLI defaults (port 5109, model_id default).
-8.  VLA registration: ``"tdmpc2"`` appears in ``robo_eval.config.VLA_CONFIGS``
+8.  VLA registration: ``"tdmpc2"`` appears in ``roboeval.config.VLA_CONFIGS``
     on port 5109.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -24,7 +25,6 @@ import sys
 from unittest.mock import MagicMock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,7 +52,7 @@ def _import_tdmpc2_policy():
         if mod not in sys.modules:
             sys.modules[mod] = MagicMock()
 
-    import robo_eval.specs  # noqa: F401
+    import roboeval.specs
 
     if "sims.vla_policies.tdmpc2_policy" in sys.modules:
         del sys.modules["sims.vla_policies.tdmpc2_policy"]
@@ -84,6 +84,7 @@ def policy_instance(policy_cls):
 class TestABCCompliance:
     def test_is_vla_policy_base_subclass(self, policy_cls):
         from sims.vla_policies.base import VLAPolicyBase
+
         assert issubclass(policy_cls, VLAPolicyBase)
 
     def test_load_model_declared(self, policy_cls):
@@ -110,12 +111,11 @@ class TestActionSpec:
 
     def test_has_eef_delta_key(self, policy_instance):
         spec = policy_instance.get_action_spec()
-        assert "eef_delta" in spec, (
-            "TDMPC2 metaworld pairing requires 'eef_delta' action key"
-        )
+        assert "eef_delta" in spec, "TDMPC2 metaworld pairing requires 'eef_delta' action key"
 
     def test_eef_delta_is_action_obs_spec(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
+
         spec = policy_instance.get_action_spec()
         assert isinstance(spec["eef_delta"], ActionObsSpec)
 
@@ -135,9 +135,7 @@ class TestActionSpec:
         spec = policy_instance.get_action_spec()
         lo, hi = spec["eef_delta"].range
         assert lo < 0 and hi > 0
-        assert abs(lo) <= 1.5 and abs(hi) <= 1.5, (
-            "TDMPC2 normalises actions to roughly unit range"
-        )
+        assert abs(lo) <= 1.5 and abs(hi) <= 1.5, "TDMPC2 normalises actions to roughly unit range"
 
 
 # ---------------------------------------------------------------------------
@@ -150,14 +148,16 @@ class TestObservationSpec:
         assert isinstance(policy_instance.get_observation_spec(), dict)
 
     def test_has_primary(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
+
         obs = policy_instance.get_observation_spec()
         assert "primary" in obs
         assert isinstance(obs["primary"], ActionObsSpec)
         assert obs["primary"].format == "rgb_hwc_uint8"
 
     def test_state_is_metaworld_39(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
+
         obs = policy_instance.get_observation_spec()
         assert "state" in obs
         assert isinstance(obs["state"], ActionObsSpec)
@@ -169,7 +169,8 @@ class TestObservationSpec:
         assert "instruction" in obs
 
     def test_all_entries_are_action_obs_spec(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
+
         for key, val in policy_instance.get_observation_spec().items():
             assert isinstance(val, ActionObsSpec), f"{key}: {type(val)}"
 
@@ -228,12 +229,14 @@ class TestReset:
 
 class TestSpecContract:
     def test_action_spec_values_typed(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
+
         for key, val in policy_instance.get_action_spec().items():
             assert isinstance(val, ActionObsSpec), key
 
     def test_obs_spec_values_typed(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
+
         for key, val in policy_instance.get_observation_spec().items():
             assert isinstance(val, ActionObsSpec), key
 
@@ -254,6 +257,7 @@ class TestModuleSmoke:
     def test_default_port_5109(self):
         """Port 5109 — avoids collision with vqbet (5108)."""
         import argparse
+
         parser = argparse.ArgumentParser()
         parser.add_argument("--port", type=int, default=5109)
         args = parser.parse_args([])
@@ -272,17 +276,20 @@ class TestModuleSmoke:
 
 class TestVLARegistration:
     def test_tdmpc2_in_vla_configs(self):
-        from robo_eval.config import VLA_CONFIGS
+        from roboeval.config import VLA_CONFIGS
+
         assert "tdmpc2" in VLA_CONFIGS, (
             "tdmpc2 must be registered in VLA_CONFIGS for the orchestrator to find it"
         )
 
     def test_tdmpc2_port_5109(self):
-        from robo_eval.config import VLA_CONFIGS
+        from roboeval.config import VLA_CONFIGS
+
         assert VLA_CONFIGS["tdmpc2"].port == 5109
 
     def test_tdmpc2_model_id(self):
-        from robo_eval.config import VLA_CONFIGS
+        from roboeval.config import VLA_CONFIGS
+
         assert "tdmpc2" in VLA_CONFIGS["tdmpc2"].model_id.lower()
 
 

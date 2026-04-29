@@ -19,6 +19,7 @@ See docs/adding_a_vla.md for the full walkthrough.
 Usage:
     python -m sims.vla_policies.your_policy [--model-id MODEL] [--port PORT]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -85,14 +86,14 @@ class YourPolicy(VLAPolicyBase):
     def get_info(self) -> dict:
         """Return model metadata (returned from GET /info and used by env_wrapper)."""
         return {
-            "name": "your-model",     # TODO: short display name
+            "name": "your-model",  # TODO: short display name
             "model_id": self.model_id,
             "action_space": {
                 "type": "eef_delta",  # TODO: or "joint_pos"
-                "dim": 7,             # TODO: match your model's output dim
+                "dim": 7,  # TODO: match your model's output dim
             },
-            "state_dim": 8,           # TODO: 0 if model ignores state
-            "action_chunk_size": 1,   # TODO: actions returned per /predict call
+            "state_dim": 8,  # TODO: 0 if model ignores state
+            "action_chunk_size": 1,  # TODO: actions returned per /predict call
         }
 
     def reset(self) -> None:
@@ -107,16 +108,18 @@ def main():
 
     parser = argparse.ArgumentParser(description="Template VLA Policy Server")
     parser.add_argument("--model-id", default=_MODEL_ID_DEFAULT)
-    parser.add_argument("--port",     type=int, default=5103)  # TODO: pick your port
-    parser.add_argument("--host",     default="0.0.0.0")
-    parser.add_argument("--device",   default="cuda")
+    parser.add_argument("--port", type=int, default=5103)  # TODO: pick your port
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--device", default="cuda")
     # TODO: add model-specific args here, e.g.:
     # parser.add_argument("--unnorm-key", dest="unnorm_key", default="libero_spatial")
     args = parser.parse_args()
 
     policy = YourPolicy()
     app = make_app(
-        policy, args.model_id, args.device,
+        policy,
+        args.model_id,
+        args.device,
         title="Template VLA Policy Server",
         # TODO: forward model-specific args as kwargs, e.g.:
         # unnorm_key=args.unnorm_key,

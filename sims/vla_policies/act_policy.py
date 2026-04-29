@@ -36,6 +36,7 @@ Design notes
 * GPU coordination: this server can run alongside simulator processes on the
   same GPU when memory allows.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,13 +45,14 @@ import logging
 from io import BytesIO
 
 import numpy as np
-from sims.vla_policies.base import VLAPolicyBase, make_app
-from sims.vla_policies.vla_schema import VLAObservation
-from robo_eval.specs import (
-    ActionObsSpec,
+
+from roboeval.specs import (
     IMAGE_RGB,
     LANGUAGE,
+    ActionObsSpec,
 )
+from sims.vla_policies.base import VLAPolicyBase, make_app
+from sims.vla_policies.vla_schema import VLAObservation
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +89,9 @@ class ACTPolicy(VLAPolicyBase):
         try:
             from lerobot.policies.act.modeling_act import ACTPolicy as _ACT
         except ImportError:
-            from lerobot.common.policies.act.modeling_act import ACTPolicy as _ACT  # type: ignore[no-redef]
+            from lerobot.common.policies.act.modeling_act import (
+                ACTPolicy as _ACT,  # type: ignore[no-redef]
+            )
 
         self._policy = _ACT.from_pretrained(model_id)
         self._policy.to(torch.device(device))
@@ -101,6 +105,7 @@ class ACTPolicy(VLAPolicyBase):
         # Infer action and state dims from config or fall back to aloha defaults.
         try:
             from lerobot.utils.constants import ACTION, OBS_STATE
+
             self._action_dim = cfg.output_features[ACTION].shape[0]
             self._state_dim = cfg.input_features[OBS_STATE].shape[0]
         except Exception:
@@ -121,18 +126,19 @@ class ACTPolicy(VLAPolicyBase):
         # that are NOT loaded by newer lerobot (they appear as "unexpected keys").
         # We load them manually from the safetensors file so that predict() can apply
         # the correct input / output transforms regardless of lerobot version.
-        self._img_mean: "torch.Tensor | None" = None
-        self._img_std: "torch.Tensor | None" = None
-        self._state_mean: "torch.Tensor | None" = None
-        self._state_std: "torch.Tensor | None" = None
-        self._action_mean: "torch.Tensor | None" = None
-        self._action_std: "torch.Tensor | None" = None
+        self._img_mean: torch.Tensor | None = None
+        self._img_std: torch.Tensor | None = None
+        self._state_mean: torch.Tensor | None = None
+        self._state_std: torch.Tensor | None = None
+        self._action_mean: torch.Tensor | None = None
+        self._action_std: torch.Tensor | None = None
         self._needs_manual_norm = False  # set True if old-style buffers found
 
         try:
+            from pathlib import Path as _Path
+
             from huggingface_hub import snapshot_download
             from safetensors.torch import load_file as _load_sf
-            from pathlib import Path as _Path
 
             try:
                 _ckpt = _Path(snapshot_download(model_id, local_files_only=True))
@@ -142,19 +148,19 @@ class ACTPolicy(VLAPolicyBase):
             _sf = _ckpt / "model.safetensors"
             if _sf.exists():
                 _w = _load_sf(str(_sf))
-                _img_m   = _w.get("normalize_inputs.buffer_observation_images_top.mean")
-                _img_s   = _w.get("normalize_inputs.buffer_observation_images_top.std")
-                _st_m    = _w.get("normalize_inputs.buffer_observation_state.mean")
-                _st_s    = _w.get("normalize_inputs.buffer_observation_state.std")
-                _act_m   = _w.get("unnormalize_outputs.buffer_action.mean")
-                _act_s   = _w.get("unnormalize_outputs.buffer_action.std")
+                _img_m = _w.get("normalize_inputs.buffer_observation_images_top.mean")
+                _img_s = _w.get("normalize_inputs.buffer_observation_images_top.std")
+                _st_m = _w.get("normalize_inputs.buffer_observation_state.mean")
+                _st_s = _w.get("normalize_inputs.buffer_observation_state.std")
+                _act_m = _w.get("unnormalize_outputs.buffer_action.mean")
+                _act_s = _w.get("unnormalize_outputs.buffer_action.std")
                 if _act_m is not None and _act_s is not None:
-                    self._img_mean   = _img_m.float()   if _img_m  is not None else None
-                    self._img_std    = _img_s.float()   if _img_s  is not None else None
-                    self._state_mean = _st_m.float()    if _st_m   is not None else None
-                    self._state_std  = _st_s.float()    if _st_s   is not None else None
+                    self._img_mean = _img_m.float() if _img_m is not None else None
+                    self._img_std = _img_s.float() if _img_s is not None else None
+                    self._state_mean = _st_m.float() if _st_m is not None else None
+                    self._state_std = _st_s.float() if _st_s is not None else None
                     self._action_mean = _act_m.float()
-                    self._action_std  = _act_s.float()
+                    self._action_std = _act_s.float()
                     self._needs_manual_norm = True
                     logger.info(
                         "ACT: loaded old-style normalization buffers from checkpoint; "
@@ -163,7 +169,9 @@ class ACTPolicy(VLAPolicyBase):
                         _act_m[:5].tolist(),
                     )
         except Exception as _e:
-            logger.warning("ACT: could not load normalization stats (%s); using raw model output", _e)
+            logger.warning(
+                "ACT: could not load normalization stats (%s); using raw model output", _e
+            )
 
         self.ready = True
         logger.info(
@@ -197,7 +205,7 @@ class ACTPolicy(VLAPolicyBase):
 
         to_tensor = transforms.ToTensor()
 
-        def decode(b64: str) -> "torch.Tensor":
+        def decode(b64: str) -> torch.Tensor:
             return to_tensor(Image.open(BytesIO(base64.b64decode(b64))).convert("RGB"))
 
         state_list = obs.state.get("flat") or [0.0] * self._state_dim
@@ -219,8 +227,7 @@ class ACTPolicy(VLAPolicyBase):
 
         # Move tensors to device.
         batch = {
-            k: v.to(self._device) if isinstance(v, torch.Tensor) else v
-            for k, v in batch.items()
+            k: v.to(self._device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()
         }
 
         with torch.no_grad():
@@ -229,7 +236,11 @@ class ACTPolicy(VLAPolicyBase):
         if isinstance(action, torch.Tensor):
             action = action.cpu()
 
-        if self._needs_manual_norm and self._action_mean is not None and self._action_std is not None:
+        if (
+            self._needs_manual_norm
+            and self._action_mean is not None
+            and self._action_std is not None
+        ):
             # Unnormalise: action_real = action_normalised * std + mean
             action = action * self._action_std + self._action_mean
 

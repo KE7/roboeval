@@ -43,25 +43,6 @@ _SAFE_NAME_RE = re.compile(r"[^\w\-.]")
 
 
 @dataclass
-class ServerConfig:
-    """Configuration for a VLA or sim HTTP server."""
-
-    url: str = "http://localhost:5100"
-    timeout: float = 60.0
-    name: str = ""
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any] | None) -> "ServerConfig":
-        if not d:
-            return cls()
-        return cls(
-            url=d.get("url", "http://localhost:5100"),
-            timeout=float(d.get("timeout", 60.0)),
-            name=d.get("name", ""),
-        )
-
-
-@dataclass
 class EvalConfig:
     """Flat evaluation configuration loaded from YAML.
 

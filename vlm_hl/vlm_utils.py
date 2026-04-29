@@ -8,7 +8,7 @@ def format_action_sequence(action_sequence: list[str]) -> str:
 
     Example: ["pick up cup", "place on table"] -> "1. pick up cup 2. place on table\\n"
     """
-    parts = [f"{i+1}. {action}" for i, action in enumerate(action_sequence)]
+    parts = [f"{i + 1}. {action}" for i, action in enumerate(action_sequence)]
     return " ".join(parts) + "\n"
 
 

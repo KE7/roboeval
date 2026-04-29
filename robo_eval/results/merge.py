@@ -176,37 +176,6 @@ def merge_shards(shards: list[dict[str, Any]]) -> dict[str, Any]:
     return merged
 
 
-def merge_shards_from_pattern(pattern: str, output_path: str | Path) -> dict[str, Any]:
-    """Find shard files by glob pattern, merge, and write to *output_path*.
-
-    Parameters
-    ----------
-    pattern:
-        Glob pattern for shard JSON files.
-    output_path:
-        Path to write the merged JSON result.
-
-    Returns
-    -------
-    dict
-        The merged result dict.
-    """
-    paths = find_shard_files(pattern)
-    logger.info("Found %d shard files matching %r", len(paths), pattern)
-    for p in paths:
-        logger.info("  %s", p)
-
-    shards = load_shard_files(paths)
-    merged = merge_shards(shards)
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(merged, indent=2, default=str))
-    logger.info("Merged result written to %s", output_path)
-
-    return merged
-
-
 def print_merge_report(merged: dict[str, Any]) -> None:
     """Print a human-readable merge report to stderr."""
     try:

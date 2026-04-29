@@ -35,6 +35,7 @@ Observation space:
     ``observation.image``: top-down camera (96 x 96).
     ``observation.state``: 2-dim robot keypoint state [x, y].
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,9 +44,10 @@ import logging
 from io import BytesIO
 
 import numpy as np
+
+from roboeval.specs import ActionObsSpec
 from sims.vla_policies.base import VLAPolicyBase, make_app
 from sims.vla_policies.vla_schema import VLAObservation
-from robo_eval.specs import ActionObsSpec
 
 logger = logging.getLogger(__name__)
 
@@ -94,11 +96,11 @@ class VQBeTPolicyServer(VLAPolicyBase):
 
         import draccus
         from huggingface_hub import hf_hub_download
-
         from lerobot.policies.vqbet.configuration_vqbet import VQBeTConfig
 
-        config_path = hf_hub_download(repo_id=model_id, filename="config.json",
-                                      local_files_only=True)
+        config_path = hf_hub_download(
+            repo_id=model_id, filename="config.json", local_files_only=True
+        )
 
         with open(config_path) as f:
             cfg_dict = json.load(f)
@@ -133,9 +135,9 @@ class VQBeTPolicyServer(VLAPolicyBase):
 
     def load_model(self, model_id: str, device: str, **_) -> None:
         import torch
-        from safetensors.torch import load_file as _load_safetensors
-        from lerobot.policies.vqbet.modeling_vqbet import VQBeTPolicy as _VQBeTPolicy
         from huggingface_hub import hf_hub_download as _hf_dl
+        from lerobot.policies.vqbet.modeling_vqbet import VQBeTPolicy as _VQBeTPolicy
+        from safetensors.torch import load_file as _load_safetensors
 
         self.model_id = model_id
         logger.info("Loading VQBeTPolicy from %s on %s ...", model_id, device)
@@ -156,8 +158,7 @@ class VQBeTPolicyServer(VLAPolicyBase):
         # select_action().
         self._norm_stats: dict = {}  # {"norm"/"denorm": {feat_key: {"min": Tensor, ...}}}
         try:
-            _st_path = _hf_dl(repo_id=model_id, filename="model.safetensors",
-                               local_files_only=True)
+            _st_path = _hf_dl(repo_id=model_id, filename="model.safetensors", local_files_only=True)
             _st = _load_safetensors(_st_path)
             dev_t = torch.device(device)
             # Keys look like:
@@ -167,9 +168,8 @@ class VQBeTPolicyServer(VLAPolicyBase):
             #   unnormalize_outputs.buffer_action.max
             # Feature name has dots replaced by underscores in the buffer key.
             # We reconstruct original feature names from config.
-            all_feat_names = (
-                list(_compat_config.input_features.keys())
-                + list(_compat_config.output_features.keys())
+            all_feat_names = list(_compat_config.input_features.keys()) + list(
+                _compat_config.output_features.keys()
             )
             for k, v in _st.items():
                 for prefix, bucket in [
@@ -179,9 +179,9 @@ class VQBeTPolicyServer(VLAPolicyBase):
                     if not k.startswith(prefix):
                         continue
                     # remainder: "<feat_underscored>.<stat>"
-                    remainder = k[len(prefix):]
-                    stat = remainder.rsplit(".", 1)[-1]        # "min" or "max"
-                    buf_feat = remainder[: -(len(stat) + 1)]   # e.g. "observation_state"
+                    remainder = k[len(prefix) :]
+                    stat = remainder.rsplit(".", 1)[-1]  # "min" or "max"
+                    buf_feat = remainder[: -(len(stat) + 1)]  # e.g. "observation_state"
                     # Match against known feature names (dots → underscores)
                     feat = next(
                         (f for f in all_feat_names if f.replace(".", "_") == buf_feat),
@@ -189,8 +189,10 @@ class VQBeTPolicyServer(VLAPolicyBase):
                     )
                     self._norm_stats.setdefault(bucket, {}).setdefault(feat, {})[stat] = v.to(dev_t)
             if self._norm_stats:
-                logger.info("Loaded normalization stats from checkpoint: %s",
-                            {b: list(v.keys()) for b, v in self._norm_stats.items()})
+                logger.info(
+                    "Loaded normalization stats from checkpoint: %s",
+                    {b: list(v.keys()) for b, v in self._norm_stats.items()},
+                )
             else:
                 logger.warning(
                     "No normalization buffers found in checkpoint safetensors. "
@@ -266,10 +268,12 @@ class VQBeTPolicyServer(VLAPolicyBase):
         from PIL import Image
         from torchvision import transforms
 
-        resize = transforms.Compose([
-            transforms.Resize((self._image_h, self._image_w)),
-            transforms.ToTensor(),
-        ])
+        resize = transforms.Compose(
+            [
+                transforms.Resize((self._image_h, self._image_w)),
+                transforms.ToTensor(),
+            ]
+        )
 
         # Decode primary camera image.
         img_b64 = obs.images.get("primary") or obs.images.get("image") or ""
@@ -281,24 +285,20 @@ class VQBeTPolicyServer(VLAPolicyBase):
 
         # Robot state — 2-dim for PushT.
         state_list = obs.state.get("flat") or [0.0] * self._state_dim
-        state_tensor = torch.tensor(
-            state_list[: self._state_dim], dtype=torch.float32
-        )
+        state_tensor = torch.tensor(state_list[: self._state_dim], dtype=torch.float32)
 
         dev = torch.device(self._device)
 
         # Apply observation normalization (MIN-MAX → [-1, 1]).
         # Apply checkpoint min/max stats when they are available.
-        state_norm = self._min_max_norm(
-            state_tensor.to(dev), "norm", "observation.state"
-        )
+        state_norm = self._min_max_norm(state_tensor.to(dev), "norm", "observation.state")
 
         # select_action() expects per-step shapes: image (batch, C, H, W),
         # state (batch, state_dim).  The internal queues handle the n_obs_steps
         # temporal dimension.  Do NOT unsqueeze the time dimension here.
         obs_batch = {
             self._camera_key: img_tensor.unsqueeze(0).to(dev),  # (1, C, H, W)
-            "observation.state": state_norm.unsqueeze(0),       # (1, state_dim)
+            "observation.state": state_norm.unsqueeze(0),  # (1, state_dim)
         }
 
         with torch.no_grad():
@@ -333,7 +333,8 @@ class VQBeTPolicyServer(VLAPolicyBase):
                 "cameras": ["primary"],
                 "state_dim": getattr(self, "_state_dim", 2),
                 "image_resolution": [self._image_h, self._image_w]
-                if hasattr(self, "_image_h") else [_PUSHT_IMAGE_SIZE, _PUSHT_IMAGE_SIZE],
+                if hasattr(self, "_image_h")
+                else [_PUSHT_IMAGE_SIZE, _PUSHT_IMAGE_SIZE],
                 "image_transform": "none",
             },
         }
@@ -348,14 +349,20 @@ class VQBeTPolicyServer(VLAPolicyBase):
         if action_dim == 2:
             return {
                 "eef_xy": ActionObsSpec(
-                    "eef_xy", 2, "absolute_xy_position", (0.0, 512.0),
+                    "eef_xy",
+                    2,
+                    "absolute_xy_position",
+                    (0.0, 512.0),
                     description="2-dim absolute (x,y) end-effector position (PushT coordinates)",
                 ),
             }
         else:
             return {
                 "joint_pos": ActionObsSpec(
-                    "joint_pos", action_dim, "joint_pos_absolute", (-3.15, 3.15),
+                    "joint_pos",
+                    action_dim,
+                    "joint_pos_absolute",
+                    (-3.15, 3.15),
                     description=f"{action_dim}-dim joint position absolute",
                 ),
             }
@@ -366,14 +373,15 @@ class VQBeTPolicyServer(VLAPolicyBase):
         return {
             "primary": ActionObsSpec("image", 0, "rgb_hwc_uint8"),
             "state": ActionObsSpec(
-                "state", state_dim,
+                "state",
+                state_dim,
                 # "agent_xy_position" matches GymPushTBackend observation_spec
                 # state.format — parity with DiffusionPolicyServer.
                 "agent_xy_position" if state_dim == 2 else "eef_state",
                 description=(
                     "2-dim (x,y) agent position for PushT"
-                    if state_dim == 2 else
-                    f"{state_dim}-dim proprioceptive state"
+                    if state_dim == 2
+                    else f"{state_dim}-dim proprioceptive state"
                 ),
             ),
         }

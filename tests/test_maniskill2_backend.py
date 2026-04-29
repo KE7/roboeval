@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import platform
 import sys
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -27,10 +26,10 @@ import pytest
 sys.path.insert(0, ".")
 from sims.sim_worker import BACKENDS, ManiSkill2Backend
 
-
 # ===========================================================================
 # 1. Registration
 # ===========================================================================
+
 
 class TestRegistration:
     def test_registered_in_backends(self):
@@ -44,6 +43,7 @@ class TestRegistration:
 # ===========================================================================
 # 2. get_info — valid spec without any mani_skill2 import
 # ===========================================================================
+
 
 class TestGetInfo:
     def setup_method(self):
@@ -108,6 +108,7 @@ class TestGetInfo:
 # 3. init() on aarch64 raises RuntimeError
 # ===========================================================================
 
+
 class TestInitAarch64:
     """On aarch64, init() must raise RuntimeError with sapien diagnostics."""
 
@@ -137,6 +138,7 @@ class TestInitAarch64:
 # ===========================================================================
 # 4. Task resolution
 # ===========================================================================
+
 
 class TestTaskResolution:
     def setup_method(self):
@@ -173,6 +175,7 @@ class TestTaskResolution:
 # ===========================================================================
 # 5. _extract_image graceful fallback
 # ===========================================================================
+
 
 class TestExtractImage:
     def setup_method(self):
@@ -214,6 +217,7 @@ class TestExtractImage:
 # ===========================================================================
 # 6. TASKS list integrity
 # ===========================================================================
+
 
 class TestTasksList:
     def test_tasks_non_empty(self):

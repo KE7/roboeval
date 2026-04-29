@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import pytest
 
@@ -25,7 +23,6 @@ from robo_eval.specs import (
     check_specs,
 )
 
-
 # ---------------------------------------------------------------------------
 # ActionObsSpec construction
 # ---------------------------------------------------------------------------
@@ -42,7 +39,9 @@ class TestActionObsSpecConstruction:
         assert spec.description == ""
 
     def test_with_accepts(self):
-        spec = ActionObsSpec("rotation", 3, "euler_xyz", accepts=frozenset({"euler_xyz", "axis_angle"}))
+        spec = ActionObsSpec(
+            "rotation", 3, "euler_xyz", accepts=frozenset({"euler_xyz", "axis_angle"})
+        )
         assert spec.accepts == frozenset({"euler_xyz", "axis_angle"})
 
     def test_frozen(self):
@@ -96,7 +95,9 @@ class TestActionObsSpecValidate:
 
     def test_inf_detected(self):
         errors = POSITION_DELTA.validate(np.array([0.0, float("inf"), 0.0]))
-        assert any("NaN" in e or "Inf" in e or "nan" in e.lower() or "inf" in e.lower() for e in errors)
+        assert any(
+            "NaN" in e or "Inf" in e or "nan" in e.lower() or "inf" in e.lower() for e in errors
+        )
 
     def test_too_few_dims(self):
         errors = POSITION_DELTA.validate(np.array([0.0, 0.5]))  # only 2D, expects 3
@@ -144,7 +145,11 @@ class TestActionObsSpecRoundTrip:
 
     def test_with_accepts(self):
         spec = ActionObsSpec(
-            "rotation", 3, "euler_xyz", (-3.15, 3.15), accepts=frozenset({"euler_xyz", "axis_angle"})
+            "rotation",
+            3,
+            "euler_xyz",
+            (-3.15, 3.15),
+            accepts=frozenset({"euler_xyz", "axis_angle"}),
         )
         rt = self._roundtrip(spec)
         assert rt == spec
@@ -159,7 +164,9 @@ class TestActionObsSpecRoundTrip:
         assert rt == spec
 
     def test_with_description(self):
-        spec = ActionObsSpec("gripper", 1, "binary_close_positive", (-1.0, 1.0), description="pi05 convention")
+        spec = ActionObsSpec(
+            "gripper", 1, "binary_close_positive", (-1.0, 1.0), description="pi05 convention"
+        )
         rt = self._roundtrip(spec)
         assert rt.description == "pi05 convention"
         assert rt == spec
@@ -302,7 +309,9 @@ class TestCheckSpecs:
 
     def test_warn_range_mismatch(self):
         """Server's range is (−1,1) but benchmark expects (0,1) → WARN."""
-        server_action = {"gripper": ActionObsSpec("gripper", 1, "binary_close_positive", (-1.0, 1.0))}
+        server_action = {
+            "gripper": ActionObsSpec("gripper", 1, "binary_close_positive", (-1.0, 1.0))
+        }
         bench_action = {"gripper": ActionObsSpec("gripper", 1, "binary_close_positive", (0.0, 1.0))}
         results = check_specs(server_action, bench_action, {}, {})
         sevs = self._severities(results)
@@ -332,8 +341,16 @@ class TestCheckSpecs:
     # ── No issues → empty results ─────────────────────────────────────────
 
     def test_pass_fully_compatible(self):
-        server_action = {"position": POSITION_DELTA, "rotation": ROTATION_AA, "gripper": GRIPPER_CLOSE_POS}
-        bench_action = {"position": POSITION_DELTA, "rotation": ROTATION_AA, "gripper": GRIPPER_CLOSE_POS}
+        server_action = {
+            "position": POSITION_DELTA,
+            "rotation": ROTATION_AA,
+            "gripper": GRIPPER_CLOSE_POS,
+        }
+        bench_action = {
+            "position": POSITION_DELTA,
+            "rotation": ROTATION_AA,
+            "gripper": GRIPPER_CLOSE_POS,
+        }
         server_obs = {"image": IMAGE_RGB, "language": LANGUAGE}
         bench_obs = {"image": IMAGE_RGB, "language": LANGUAGE}
         results = check_specs(server_action, bench_action, server_obs, bench_obs)

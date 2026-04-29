@@ -23,12 +23,17 @@ def _stub_optional_modules() -> None:
     libero, gym_aloha, etc.
     """
     for mod in [
-        "robosuite", "robosuite.wrappers",
-        "libero", "libero.envs", "libero.envs.libero_envs",
+        "robosuite",
+        "robosuite.wrappers",
+        "libero",
+        "libero.envs",
+        "libero.envs.libero_envs",
         "libero.envs.bddl_base_domain",
-        "libero.libero", "libero.libero.benchmark",
+        "libero.libero",
+        "libero.libero.benchmark",
         "bddl",
-        "gymnasium", "gym_aloha",
+        "gymnasium",
+        "gym_aloha",
     ]:
         if mod not in sys.modules:
             sys.modules[mod] = types.ModuleType(mod)
@@ -45,7 +50,7 @@ def _stub_optional_modules() -> None:
 
 _stub_optional_modules()
 
-from sims.sim_worker import (  # noqa: E402  (after stubbing)
+from sims.sim_worker import (  # after stubbing
     BACKENDS,
     AlohaGymBackend,
     SimBackendBase,
@@ -66,10 +71,8 @@ class TestAlohaGymBackendABCCompliance(unittest.TestCase):
     def test_implements_all_abstract_methods(self):
         """No abstract methods leak through."""
         b = AlohaGymBackend()
-        for name in ("init", "reset", "step", "get_obs", "check_success",
-                     "close", "get_info"):
-            self.assertTrue(callable(getattr(b, name)),
-                            f"missing method: {name}")
+        for name in ("init", "reset", "step", "get_obs", "check_success", "close", "get_info"):
+            self.assertTrue(callable(getattr(b, name)), f"missing method: {name}")
         # Instantiation would have raised TypeError if any abstract method
         # were left unimplemented; reaching here confirms ABC compliance.
 
@@ -99,8 +102,14 @@ class TestAlohaGymBackendGetInfo(unittest.TestCase):
 
     def test_info_top_level_keys(self):
         info = self.backend.get_info()
-        for key in ("action_space", "obs_space", "max_steps", "delta_actions",
-                    "action_spec", "observation_spec"):
+        for key in (
+            "action_space",
+            "obs_space",
+            "max_steps",
+            "delta_actions",
+            "action_spec",
+            "observation_spec",
+        ):
             self.assertIn(key, info, f"get_info() missing key: {key}")
 
     def test_action_space_is_14dim_joint_pos(self):
@@ -185,7 +194,7 @@ class TestAlohaGymBackendImageExtraction(unittest.TestCase):
 
     def _synthetic_obs(self, h: int = 8, w: int = 8) -> dict:
         top = np.zeros((h, w, 3), dtype=np.uint8)
-        top[0, :, 0] = 200          # gradient on row 0
+        top[0, :, 0] = 200  # gradient on row 0
         angle = np.zeros((h, w, 3), dtype=np.uint8)
         angle[0, :, 1] = 100
         return {

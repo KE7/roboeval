@@ -16,23 +16,23 @@ These tests guarantee:
 6. **All currently-shipped (model, sim) pairs in ``configs/``** parse and
    validate without raising.
 """
+
 from __future__ import annotations
 
 import pytest
 
+from sims.env_wrapper import SpecMismatchError
+
 # Reuse the shared mocked handshake helpers.
 from tests.test_spec_handshake import (
-    _make_vla_info,
+    _libero_action_spec,
+    _libero_obs_spec,
     _make_sim_info,
+    _make_vla_info,
     _make_wrapper,
     _pi05_action_spec,
     _pi05_obs_spec,
-    _libero_action_spec,
-    _libero_obs_spec,
 )
-
-from sims.env_wrapper import SpecMismatchError
-
 
 # ---------------------------------------------------------------------------
 # 1. Mismatched action dim → orchestrator raises at episode start
@@ -43,12 +43,13 @@ class TestActionDimMismatch:
     def test_action_position_dim_mismatch_raises(self, monkeypatch):
         bad_action = dict(_pi05_action_spec())
         bad_action["position"] = {
-            "name": "position", "dims": 6, "format": "delta_xyz", "range": [-1, 1]
+            "name": "position",
+            "dims": 6,
+            "format": "delta_xyz",
+            "range": [-1, 1],
         }
         vla = _make_vla_info(action_spec=bad_action, observation_spec=_pi05_obs_spec())
-        sim = _make_sim_info(
-            action_spec=_libero_action_spec(), observation_spec=_libero_obs_spec()
-        )
+        sim = _make_sim_info(action_spec=_libero_action_spec(), observation_spec=_libero_obs_spec())
         with pytest.raises(SpecMismatchError, match="HARD"):
             _make_wrapper(vla, sim, monkeypatch)
 
@@ -70,7 +71,9 @@ class TestStateDimMismatch:
         # RoboCasa-style sim: 9-dim quaternion state.
         robocasa_obs = dict(_libero_obs_spec())
         robocasa_obs["state"] = {
-            "name": "state", "dims": 9, "format": "robocasa_grip2_eef_pos3_quat4"
+            "name": "state",
+            "dims": 9,
+            "format": "robocasa_grip2_eef_pos3_quat4",
         }
         sim = _make_sim_info(
             action_spec=_libero_action_spec(),
@@ -83,12 +86,11 @@ class TestStateDimMismatch:
     def test_state_format_mismatch_raises(self, monkeypatch):
         """Same dim, different format → HARD (axis-angle 8d vs quat-prefixed 8d)."""
         vla = _make_vla_info(
-            action_spec=_pi05_action_spec(), observation_spec=_pi05_obs_spec(),
+            action_spec=_pi05_action_spec(),
+            observation_spec=_pi05_obs_spec(),
         )
         bad_obs = dict(_libero_obs_spec())
-        bad_obs["state"] = {
-            "name": "state", "dims": 8, "format": "robocasa_quat_format"
-        }
+        bad_obs["state"] = {"name": "state", "dims": 8, "format": "robocasa_quat_format"}
         sim = _make_sim_info(action_spec=_libero_action_spec(), observation_spec=bad_obs)
         with pytest.raises(SpecMismatchError, match="HARD"):
             _make_wrapper(vla, sim, monkeypatch)
@@ -119,7 +121,9 @@ class TestGripperConventionMismatch:
     def test_gripper_close_positive_vs_negative_raises(self, monkeypatch):
         bad_action = dict(_pi05_action_spec())
         bad_action["gripper"] = {
-            "name": "gripper", "dims": 1, "format": "binary_close_positive",
+            "name": "gripper",
+            "dims": 1,
+            "format": "binary_close_positive",
             "range": [-1, 1],
         }
         vla = _make_vla_info(action_spec=bad_action, observation_spec=_pi05_obs_spec())

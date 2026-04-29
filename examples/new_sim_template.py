@@ -44,11 +44,10 @@ Image flip contract:
 
 See docs/extending.md for the full walkthrough, pitfall list, and checklist.
 """
+
 from __future__ import annotations
 
 import numpy as np
-from typing import Optional
-
 
 # =============================================================================
 # TODO [STEP 1]: Add any imports your simulator needs here.
@@ -65,9 +64,9 @@ class MySimBackend:
 
     def __init__(self) -> None:
         # TODO: declare instance variables used across methods.
-        self.env = None                   # the actual simulator environment object
-        self._last_obs: dict = {}         # cache last raw observation dict
-        self._cam_res: int = 256          # camera resolution (set in init())
+        self.env = None  # the actual simulator environment object
+        self._last_obs: dict = {}  # cache last raw observation dict
+        self._cam_res: int = 256  # camera resolution (set in init())
         self._task_name: str = ""
         self._delta_actions: bool = False
 
@@ -78,9 +77,9 @@ class MySimBackend:
         self,
         task_name: str,
         camera_resolution: int,
-        suite: Optional[str] = None,
+        suite: str | None = None,
         headless: bool = True,
-        sim_config: Optional[dict] = None,
+        sim_config: dict | None = None,
     ) -> dict:
         """Initialize the simulator environment for a specific task.
 
@@ -109,7 +108,7 @@ class MySimBackend:
     # =========================================================================
     # REQUIRED METHOD 2 — reset
     # =========================================================================
-    def reset(self, episode_index: Optional[int] = None) -> tuple[np.ndarray, Optional[np.ndarray]]:
+    def reset(self, episode_index: int | None = None) -> tuple[np.ndarray, np.ndarray | None]:
         """Reset to the start of a new episode.
 
         Args:
@@ -137,9 +136,7 @@ class MySimBackend:
     # =========================================================================
     # REQUIRED METHOD 3 — step
     # =========================================================================
-    def step(
-        self, action: list
-    ) -> tuple[np.ndarray, Optional[np.ndarray], float, bool, dict]:
+    def step(self, action: list) -> tuple[np.ndarray, np.ndarray | None, float, bool, dict]:
         """Execute one action step and return the result.
 
         Args:
@@ -167,7 +164,7 @@ class MySimBackend:
     # =========================================================================
     # REQUIRED METHOD 4 — get_obs
     # =========================================================================
-    def get_obs(self) -> tuple[np.ndarray, Optional[np.ndarray]]:
+    def get_obs(self) -> tuple[np.ndarray, np.ndarray | None]:
         """Return the current observation without stepping.
 
         Called by GET /obs.  Typically returns the cached observation from the
@@ -259,17 +256,17 @@ class MySimBackend:
         return {
             # ── Action space ──────────────────────────────────────────────
             "action_space": {
-                "type": "eef_delta",          # TODO: your action type
-                "dim": 7,                     # TODO: your native action dim
-                "accepted_dims": [7],         # TODO: dims you can handle after padding/trimming
+                "type": "eef_delta",  # TODO: your action type
+                "dim": 7,  # TODO: your native action dim
+                "accepted_dims": [7],  # TODO: dims you can handle after padding/trimming
             },
             # ── Observation space ─────────────────────────────────────────
             "obs_space": {
                 "cameras": [
                     {
-                        "key": "agentview_image",          # TODO: obs dict key in your sim
+                        "key": "agentview_image",  # TODO: obs dict key in your sim
                         "resolution": [cam_res, cam_res],
-                        "role": "primary",                  # always "primary" for the main camera
+                        "role": "primary",  # always "primary" for the main camera
                     },
                     # Optional wrist camera:
                     # {
@@ -279,17 +276,17 @@ class MySimBackend:
                     # },
                 ],
                 "state": {
-                    "dim": 8,                               # TODO: state vector length (0 if none)
+                    "dim": 8,  # TODO: state vector length (0 if none)
                     "format": "eef_pos(3)+axisangle(3)+gripper_qpos(2)",  # TODO: your format
                 },
                 # Communicate the image flip decision you made in reset()/step():
                 #   "applied_in_sim" — flip done in this backend; env_wrapper must NOT flip again.
                 #   "none"           — no flip needed for this camera orientation.
-                "image_transform": "applied_in_sim",        # TODO: match your reset() / step()
+                "image_transform": "applied_in_sim",  # TODO: match your reset() / step()
             },
             # ── Episode limits ────────────────────────────────────────────
-            "max_steps": 280,          # TODO: hard time limit for your tasks
-            "delta_actions": False,    # TODO: True for EEF delta, False for absolute targets
+            "max_steps": 280,  # TODO: hard time limit for your tasks
+            "delta_actions": False,  # TODO: True for EEF delta, False for absolute targets
             # ── Typed ActionObsSpec contracts (optional but recommended) ────────
             # These are serialized via ActionObsSpec.to_dict() — see robo_eval/specs.py.
             # Uncomment and fill in to enable spec checking:

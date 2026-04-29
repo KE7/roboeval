@@ -21,6 +21,7 @@ Usage:
 Extra endpoint beyond the standard four:
     POST /reload {model_id, unnorm_key} → hot-swap checkpoint (blocks until ready)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,15 +33,16 @@ from io import BytesIO
 import numpy as np
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sims.vla_policies.base import VLAPolicyBase, make_app
-from sims.vla_policies.vla_schema import VLAObservation
-from robo_eval.specs import (
-    ActionObsSpec,
-    POSITION_DELTA,
+
+from roboeval.specs import (
     GRIPPER_CLOSE_NEG,
     IMAGE_RGB,
     LANGUAGE,
+    POSITION_DELTA,
+    ActionObsSpec,
 )
+from sims.vla_policies.base import VLAPolicyBase, make_app
+from sims.vla_policies.vla_schema import VLAObservation
 
 logger = logging.getLogger(__name__)
 _ACTION_DIM = 7
@@ -120,7 +122,9 @@ class OpenVLAPolicy(VLAPolicyBase):
         return [action.tolist()]
 
     def get_info(self) -> dict:
-        name = (self.model_id.split("/")[-1] if "/" in self.model_id else self.model_id) or "openvla"
+        name = (
+            self.model_id.split("/")[-1] if "/" in self.model_id else self.model_id
+        ) or "openvla"
         return {
             "name": name,
             "model_id": self.model_id,
@@ -129,7 +133,7 @@ class OpenVLAPolicy(VLAPolicyBase):
                 "dim": _ACTION_DIM,
                 "description": "EEF delta: [dx,dy,dz,droll,dpitch,dyaw,gripper]",
             },
-            "state_dim": 0,          # OpenVLA ignores robot state
+            "state_dim": 0,  # OpenVLA ignores robot state
             "action_chunk_size": 1,  # single-step, not chunk-based
             "obs_requirements": {
                 "cameras": ["primary"],
@@ -187,7 +191,9 @@ def main():
 
     policy = OpenVLAPolicy()
     app = make_app(
-        policy, args.model_id, args.device,
+        policy,
+        args.model_id,
+        args.device,
         title="OpenVLA Policy Server",
         unnorm_key=args.unnorm_key,
     )
@@ -207,8 +213,10 @@ def main():
 
         logger.info(
             "Reloading: %s → %s  (unnorm_key: %s → %s)",
-            policy.model_id, req.model_id,
-            getattr(policy, "_unnorm_key", ""), req.unnorm_key,
+            policy.model_id,
+            req.model_id,
+            getattr(policy, "_unnorm_key", ""),
+            req.unnorm_key,
         )
         policy.ready = False
         for attr in ("_model", "_processor"):

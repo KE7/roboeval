@@ -30,6 +30,7 @@ Observation space:
     ``observation.image``: top-down camera (96 × 96).
     ``observation.state``: 2-dim robot state [x, y].
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,9 +39,10 @@ import logging
 from io import BytesIO
 
 import numpy as np
+
+from roboeval.specs import ActionObsSpec
 from sims.vla_policies.base import VLAPolicyBase, make_app
 from sims.vla_policies.vla_schema import VLAObservation
-from robo_eval.specs import ActionObsSpec
 
 logger = logging.getLogger(__name__)
 
@@ -141,17 +143,19 @@ class DiffusionPolicyServer(VLAPolicyBase):
         # lerobot 0.4.4's from_pretrained does NOT load these normalization buffers
         # ("Unexpected key(s)" warning), so we must apply them manually.
         _IMG_MEAN = [0.485, 0.456, 0.406]  # ImageNet mean
-        _IMG_STD  = [0.229, 0.224, 0.225]  # ImageNet std
+        _IMG_STD = [0.229, 0.224, 0.225]  # ImageNet std
         _STATE_MIN = np.array([13.456, 32.938], dtype=np.float32)
         _STATE_MAX = np.array([496.146, 510.958], dtype=np.float32)
-        _ACT_MIN   = np.array([12.0, 25.0], dtype=np.float32)
-        _ACT_MAX   = np.array([511.0, 511.0], dtype=np.float32)
+        _ACT_MIN = np.array([12.0, 25.0], dtype=np.float32)
+        _ACT_MAX = np.array([511.0, 511.0], dtype=np.float32)
 
-        resize = transforms.Compose([
-            transforms.Resize((self._image_h, self._image_w)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=_IMG_MEAN, std=_IMG_STD),
-        ])
+        resize = transforms.Compose(
+            [
+                transforms.Resize((self._image_h, self._image_w)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=_IMG_MEAN, std=_IMG_STD),
+            ]
+        )
 
         # Decode primary camera image.
         img_b64 = obs.images.get("primary") or obs.images.get("image") or ""
@@ -175,7 +179,7 @@ class DiffusionPolicyServer(VLAPolicyBase):
         #   state:  (B, state_dim)
         dev = torch.device(self._device)
         obs_batch = {
-            self._camera_key: img_tensor.unsqueeze(0).to(dev),   # (1, C, H, W)
+            self._camera_key: img_tensor.unsqueeze(0).to(dev),  # (1, C, H, W)
             "observation.state": state_tensor.unsqueeze(0).to(dev),  # (1, state_dim)
         }
 
@@ -212,7 +216,8 @@ class DiffusionPolicyServer(VLAPolicyBase):
                 "cameras": ["primary"],
                 "state_dim": getattr(self, "_state_dim", 2),
                 "image_resolution": [self._image_h, self._image_w]
-                if hasattr(self, "_image_h") else [_PUSHT_IMAGE_SIZE, _PUSHT_IMAGE_SIZE],
+                if hasattr(self, "_image_h")
+                else [_PUSHT_IMAGE_SIZE, _PUSHT_IMAGE_SIZE],
                 "image_transform": "none",
             },
         }
@@ -225,7 +230,10 @@ class DiffusionPolicyServer(VLAPolicyBase):
             # Format "absolute_xy_position" matches GymPushTBackend action_spec.accepts.
             return {
                 "eef_xy": ActionObsSpec(
-                    "eef_xy", 2, "absolute_xy_position", (0.0, 512.0),
+                    "eef_xy",
+                    2,
+                    "absolute_xy_position",
+                    (0.0, 512.0),
                     description="2-dim absolute (x,y) end-effector position in PushT pixel space [0,512]",
                 ),
             }
@@ -233,7 +241,10 @@ class DiffusionPolicyServer(VLAPolicyBase):
             # ALOHA / other: joint position control.
             return {
                 "joint_pos": ActionObsSpec(
-                    "joint_pos", action_dim, "joint_pos_absolute", (-3.15, 3.15),
+                    "joint_pos",
+                    action_dim,
+                    "joint_pos_absolute",
+                    (-3.15, 3.15),
                     description=f"{action_dim}-dim joint position absolute",
                 ),
             }
@@ -244,13 +255,14 @@ class DiffusionPolicyServer(VLAPolicyBase):
         return {
             "primary": ActionObsSpec("image", 0, "rgb_hwc_uint8"),
             "state": ActionObsSpec(
-                "state", state_dim,
+                "state",
+                state_dim,
                 # "agent_xy_position" matches GymPushTBackend observation_spec state.format.
                 "agent_xy_position" if state_dim == 2 else "eef_state",
                 description=(
                     "2-dim (x,y) agent position in PushT pixel space [0,512]"
-                    if state_dim == 2 else
-                    f"{state_dim}-dim proprioceptive state"
+                    if state_dim == 2
+                    else f"{state_dim}-dim proprioceptive state"
                 ),
             ),
         }
@@ -277,7 +289,7 @@ def main():
         args.model_id,
         args.device,
         title="Diffusion Policy Server",
-        max_batch_size=1,   # DDPM denoising not batched
+        max_batch_size=1,  # DDPM denoising not batched
         max_wait_ms=0.0,
     )
     logging.basicConfig(level=logging.INFO)

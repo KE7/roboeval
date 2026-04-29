@@ -66,6 +66,7 @@ Observation space
 Note: The upstream single-task metaworld checkpoints are state-based (no
 image encoder), so the RGB camera observation is accepted but ignored.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -73,13 +74,14 @@ import logging
 import os
 
 import numpy as np
-from sims.vla_policies.base import VLAPolicyBase, make_app
-from sims.vla_policies.vla_schema import VLAObservation
-from robo_eval.specs import (
-    ActionObsSpec,
+
+from roboeval.specs import (
     IMAGE_RGB,
     LANGUAGE,
+    ActionObsSpec,
 )
+from sims.vla_policies.base import VLAPolicyBase, make_app
+from sims.vla_policies.vla_schema import VLAObservation
 
 logger = logging.getLogger(__name__)
 
@@ -191,10 +193,11 @@ class TDMPC2Policy(VLAPolicyBase):
             from lerobot.policies.tdmpc2.modeling_tdmpc2 import (  # type: ignore[import-not-found]
                 TDMPC2Policy as _TDMPC2,
             )
+
             self._policy = _TDMPC2.from_pretrained(model_id)
             self._backend = "lerobot.policies.tdmpc2"
             loaded = True
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             load_err = e
 
         # Path 2: lerobot common.* legacy path
@@ -203,10 +206,11 @@ class TDMPC2Policy(VLAPolicyBase):
                 from lerobot.common.policies.tdmpc2.modeling_tdmpc2 import (  # type: ignore[import-not-found]
                     TDMPC2Policy as _TDMPC2,
                 )
+
                 self._policy = _TDMPC2.from_pretrained(model_id)
                 self._backend = "lerobot.common.policies.tdmpc2"
                 loaded = True
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 load_err = e
 
         # Path 3: upstream-compatible nicklashansen/tdmpc2 package.
@@ -243,7 +247,7 @@ class TDMPC2Policy(VLAPolicyBase):
                 self._policy = agent
                 self._backend = "tdmpc2_upstream"
                 loaded = True
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 load_err = e
 
         if not loaded:
@@ -267,6 +271,7 @@ class TDMPC2Policy(VLAPolicyBase):
             cfg = getattr(self._policy, "config", None)
             try:
                 from lerobot.utils.constants import ACTION, OBS_STATE
+
                 self._action_dim = cfg.output_features[ACTION].shape[0]
                 self._state_dim = cfg.input_features[OBS_STATE].shape[0]
             except Exception:
@@ -274,7 +279,11 @@ class TDMPC2Policy(VLAPolicyBase):
                 self._state_dim = _STATE_DIM
 
             try:
-                image_keys = list(cfg.image_features) if (cfg is not None and getattr(cfg, "image_features", None)) else []
+                image_keys = (
+                    list(cfg.image_features)
+                    if (cfg is not None and getattr(cfg, "image_features", None))
+                    else []
+                )
             except Exception:
                 image_keys = []
             self._camera_key = image_keys[0] if image_keys else "observation.images.corner"
@@ -283,7 +292,10 @@ class TDMPC2Policy(VLAPolicyBase):
         self.ready = True
         logger.info(
             "TDMPC2 ready: model=%s, backend=%s, action_dim=%d, state_dim=%d",
-            model_id, self._backend, self._action_dim, self._state_dim,
+            model_id,
+            self._backend,
+            self._action_dim,
+            self._state_dim,
         )
 
     def predict(self, obs: VLAObservation) -> list[list[float]]:
@@ -304,12 +316,13 @@ class TDMPC2Policy(VLAPolicyBase):
             # lerobot API: select_action(batch_dict)
             import base64
             from io import BytesIO
+
             from PIL import Image
             from torchvision import transforms
 
             to_tensor = transforms.ToTensor()
 
-            def decode(b64: str) -> "torch.Tensor":
+            def decode(b64: str) -> torch.Tensor:
                 return to_tensor(Image.open(BytesIO(base64.b64decode(b64))).convert("RGB"))
 
             batch: dict = {
@@ -337,9 +350,7 @@ class TDMPC2Policy(VLAPolicyBase):
             "action_space": {
                 "type": "eef_delta",
                 "dim": getattr(self, "_action_dim", _ACTION_DIM),
-                "description": (
-                    "Sawyer end-effector delta: [dx, dy, dz, gripper]"
-                ),
+                "description": ("Sawyer end-effector delta: [dx, dy, dz, gripper]"),
             },
             "state_dim": getattr(self, "_state_dim", _STATE_DIM),
             "action_chunk_size": getattr(self, "_chunk_size", _CHUNK_SIZE),

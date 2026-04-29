@@ -3,8 +3,11 @@
 This module defines the canonical observation and prediction request schemas
 shared by all VLA policy servers (pi05, openvla, smolvla, groot, internvla).
 """
-from typing import Dict, Any, Optional
+
+from typing import Any
+
 from pydantic import BaseModel
+
 
 class VLAObservation(BaseModel):
     """Observation payload sent to VLA policy ``/predict`` endpoints.
@@ -24,9 +27,11 @@ class VLAObservation(BaseModel):
             ``{"flat": [float, ...]}`` for simple vectors,
             ``{"structured": {"joint_pos": [...]}}`` for named fields.
     """
+
     instruction: str
-    images: Dict[str, str]
-    state: Dict[str, Any]
+    images: dict[str, str]
+    state: dict[str, Any]
+
 
 class PredictRequest(BaseModel):
     obs: VLAObservation

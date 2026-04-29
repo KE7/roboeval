@@ -1,4 +1,4 @@
-"""Unit tests for robo_eval.orchestrator.
+"""Unit tests for roboeval.orchestrator.
 
 Tests:
     - Sharding: round-robin partition correctness across multiple shard_id/num_shards.
@@ -12,13 +12,8 @@ Tests:
 from __future__ import annotations
 
 import json
-import os
 import sys
-import time
-import tempfile
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch, call
 
 import pytest
 
@@ -29,14 +24,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from robo_eval.orchestrator import (
+from roboeval.orchestrator import (  # tests adjust sys.path before importing local package.
     EvalConfig,
     Orchestrator,
-    _parse_success_from_stdout,
     _parse_steps_from_stdout,
-    _SUITE_TASK_COUNTS,
+    _parse_success_from_stdout,
 )
-
 
 # ---------------------------------------------------------------------------
 # EvalConfig tests
@@ -135,10 +128,7 @@ class TestSharding:
         tasks = orch._build_task_list()
         all_items = [(t, ep) for t in tasks for ep in range(cfg.episodes_per_task)]
         if orch.num_shards is not None and orch.shard_id is not None:
-            all_items = [
-                w for i, w in enumerate(all_items)
-                if i % orch.num_shards == orch.shard_id
-            ]
+            all_items = [w for i, w in enumerate(all_items) if i % orch.num_shards == orch.shard_id]
         return all_items
 
     def test_2shards_partition_coverage(self):
@@ -162,10 +152,7 @@ class TestSharding:
 
     def test_shard_sizes_approximately_equal(self):
         """Shards have roughly equal size for 4 shards × 12 total items."""
-        sizes = [
-            len(self._get_work_items(self._make_orch(sid, 4)))
-            for sid in range(4)
-        ]
+        sizes = [len(self._get_work_items(self._make_orch(sid, 4))) for sid in range(4)]
         assert max(sizes) - min(sizes) <= 1, f"Unbalanced shards: {sizes}"
 
     def test_no_shard_all_items(self):

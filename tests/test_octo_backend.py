@@ -8,8 +8,9 @@ Covers:
   5. ActionObsSpec gate: Octo (primary image, no state) × LIBERO sim passes validation.
   6. ActionObsSpec gate: Octo × sim with mismatched state dim raises SpecMismatchError.
   7. /health endpoint returns ready=false when model is not loaded (missing octo pkg).
-  8. configs/bridge_octo_smoke.yaml parses as a valid robo-eval config.
+  8. configs/bridge_octo_smoke.yaml parses as a valid roboeval config.
 """
+
 from __future__ import annotations
 
 import sys
@@ -22,8 +23,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from sims.vla_policies.octo_policy import OctoPolicy, _ACTION_DIM
-
+from sims.vla_policies.octo_policy import (  # tests adjust sys.path before importing local package.
+    _ACTION_DIM,
+    OctoPolicy,
+)
 
 # ---------------------------------------------------------------------------
 # 1. Import without heavy deps
@@ -55,7 +58,6 @@ class TestLoadModelDegradation:
 
     def test_missing_octo_sets_load_error(self):
         """When octo package is not importable, load_model sets a clear load_error."""
-        import importlib
 
         policy = OctoPolicy()
         # Provide a fake jax so the jax guard passes
@@ -63,8 +65,10 @@ class TestLoadModelDegradation:
         fake_jax.random.PRNGKey.return_value = object()
         fake_jax.devices.return_value = [MagicMock()]
 
-        with patch.dict("sys.modules", {"jax": fake_jax, "octo": None,
-                                        "octo.model": None, "octo.model.octo_model": None}):
+        with patch.dict(
+            "sys.modules",
+            {"jax": fake_jax, "octo": None, "octo.model": None, "octo.model.octo_model": None},
+        ):
             policy.load_model("rail-berkeley/octo-small-1.5", "cpu")
 
         assert not policy.ready
@@ -89,7 +93,6 @@ class TestGetInfo:
         assert info["obs_requirements"]["cameras"] == ["primary"]
 
     def test_get_action_spec_returns_7_dims(self):
-        from robo_eval.specs import ActionObsSpec
 
         policy = OctoPolicy()
         spec = policy.get_action_spec()
@@ -115,17 +118,27 @@ class TestSpecGate:
     def test_octo_x_libero_passes_gate(self, monkeypatch):
         """Given image-only Octo observations, LIBERO validation passes."""
         from tests.test_spec_handshake import (
-            _make_vla_info,
-            _make_sim_info,
-            _make_wrapper,
             _libero_action_spec,
             _libero_obs_spec,
+            _make_sim_info,
+            _make_vla_info,
+            _make_wrapper,
         )
 
         octo_action_spec = {
             "position": {"name": "position", "dims": 3, "format": "delta_xyz", "range": [-1, 1]},
-            "rotation": {"name": "rotation", "dims": 3, "format": "delta_axisangle", "range": [-3.15, 3.15]},
-            "gripper": {"name": "gripper", "dims": 1, "format": "binary_close_negative", "range": [-1, 1]},
+            "rotation": {
+                "name": "rotation",
+                "dims": 3,
+                "format": "delta_axisangle",
+                "range": [-3.15, 3.15],
+            },
+            "gripper": {
+                "name": "gripper",
+                "dims": 1,
+                "format": "binary_close_negative",
+                "range": [-1, 1],
+            },
         }
         # Use "rgb_hwc_uint8" — the format string used by IMAGE_RGB constant and LIBERO obs spec.
         octo_obs_spec = {
@@ -133,7 +146,9 @@ class TestSpecGate:
             "instruction": {"name": "language", "dims": 0, "format": "language"},
         }
 
-        vla = _make_vla_info(action_spec=octo_action_spec, observation_spec=octo_obs_spec, state_dim=0)
+        vla = _make_vla_info(
+            action_spec=octo_action_spec, observation_spec=octo_obs_spec, state_dim=0
+        )
         sim = _make_sim_info(action_spec=_libero_action_spec(), observation_spec=_libero_obs_spec())
 
         # Should NOT raise — Octo image-only VLA can attach to LIBERO.
@@ -146,18 +161,28 @@ class TestSpecGate:
         The spec gate raises when the VLA requires a key the sim doesn't declare.
         This test verifies that a key missing from the sim side is caught.
         """
-        from tests.test_spec_handshake import (
-            _make_vla_info,
-            _make_sim_info,
-            _make_wrapper,
-            _libero_action_spec,
-        )
         from sims.env_wrapper import SpecMismatchError
+        from tests.test_spec_handshake import (
+            _libero_action_spec,
+            _make_sim_info,
+            _make_vla_info,
+            _make_wrapper,
+        )
 
         octo_action_spec = {
             "position": {"name": "position", "dims": 3, "format": "delta_xyz", "range": [-1, 1]},
-            "rotation": {"name": "rotation", "dims": 3, "format": "delta_axisangle", "range": [-3.15, 3.15]},
-            "gripper": {"name": "gripper", "dims": 1, "format": "binary_close_negative", "range": [-1, 1]},
+            "rotation": {
+                "name": "rotation",
+                "dims": 3,
+                "format": "delta_axisangle",
+                "range": [-3.15, 3.15],
+            },
+            "gripper": {
+                "name": "gripper",
+                "dims": 1,
+                "format": "binary_close_negative",
+                "range": [-1, 1],
+            },
         }
         # Octo requires a "wrist" camera that the sim doesn't provide.
         octo_obs_spec_needs_wrist = {
@@ -190,6 +215,7 @@ class TestHealthEndpoint:
     def test_health_returns_503_when_not_ready(self):
         """FastAPI /health must return 503 when model load failed."""
         from fastapi.testclient import TestClient
+
         from sims.vla_policies.base import make_app
 
         policy = OctoPolicy()
@@ -206,6 +232,7 @@ class TestHealthEndpoint:
     def test_info_endpoint_includes_notes(self):
         """GET /info must include model metadata and specs."""
         from fastapi.testclient import TestClient
+
         from sims.vla_policies.base import make_app
 
         policy = OctoPolicy()
@@ -231,7 +258,7 @@ class TestHealthEndpoint:
 class TestSmokeYaml:
     def test_bridge_octo_smoke_yaml_parses(self):
         """configs/bridge_octo_smoke.yaml must be loadable as an EvalConfig."""
-        from robo_eval.orchestrator import EvalConfig
+        from roboeval.orchestrator import EvalConfig
 
         yaml_path = PROJECT_ROOT / "configs" / "bridge_octo_smoke.yaml"
         assert yaml_path.exists(), f"Missing smoke config: {yaml_path}"
@@ -247,8 +274,8 @@ class TestSmokeYaml:
         assert "5106" in config.vla_url
 
     def test_bridge_octo_smoke_yaml_passes_preflight_validate(self):
-        """The smoke YAML must pass robo_eval.preflight.validate_yaml."""
-        from robo_eval.preflight import validate_yaml
+        """The smoke YAML must pass roboeval.preflight.validate_yaml."""
+        from roboeval.preflight import validate_yaml
 
         yaml_path = PROJECT_ROOT / "configs" / "bridge_octo_smoke.yaml"
         results = validate_yaml(yaml_path)

@@ -10,23 +10,25 @@ Configure the endpoint with ``setup_litellm()`` or via the litellm proxy.
 
 from __future__ import annotations
 
-import os
-import json
-import re
-from PIL import Image
-from enum import Enum
-from pydantic import BaseModel
-import litellm
 import base64
+import json
+import os
+import re
+from enum import Enum
 from io import BytesIO
+
 import cv2
+import litellm
+from PIL import Image
+from pydantic import BaseModel
+
 from ica.reasoning_ica import ReasoningICADir, TaskICADir
 
 # API key resolution for direct API calls and proxy-compatible setups.
 _key_path = os.path.join(os.path.dirname(__file__), "..", "utils", "openaikey.txt")
 _openai_key = os.environ.get("OPENAI_API_KEY")
 if not _openai_key and os.path.exists(_key_path):
-    with open(_key_path, "r") as _f:
+    with open(_key_path) as _f:
         _openai_key = _f.readline().strip()
 if not _openai_key:
     _openai_key = "not-needed"
@@ -156,13 +158,15 @@ def format_obj_list(objects_list):
         return ""
     return ", ".join(str(obj) for obj in objects_list)
 
+
 def get_hardware_specific_instruction_space():
     """
     Load hardware-specific instruction space details from the configured prompt file.
     """
-    with open("vlm_hl/prompts/plan_reasoning/droid_specific_instruction_space.txt", "r") as f:
+    with open("vlm_hl/prompts/plan_reasoning/droid_specific_instruction_space.txt") as f:
         sp_instruction_space = f.readlines()
     return format_obj_list(sp_instruction_space)
+
 
 def vlm_call_with_image(
     image: Image.Image, prompt: str | None = None, model: str | None = None, tf: bool = False
@@ -241,7 +245,7 @@ def encode_image_to_base64(image: Image.Image) -> str:
 def evaluate_tf_question(question, image):
     """Ask a true/false question about an image and return a boolean answer."""
     print("Asking VLM the following question: ", question)
-    with open("vlm_hl/prompts/plan_reasoning/evaluate_tf_question.txt", "r") as file:
+    with open("vlm_hl/prompts/plan_reasoning/evaluate_tf_question.txt") as file:
         prompt = file.read().format(question=question)
     response = vlm_call_with_image(image, prompt, tf=True)
     print("VLM response: ", response)
@@ -260,7 +264,7 @@ def evaluate_mc_question(question, image, options_list):
         The name of the selected option (from the dynamically generated Enum).
     """
     print("Asking VLM the following question: ", question)
-    with open("vlm_hl/prompts/plan_reasoning/evaluate_mc_question.txt", "r") as file:
+    with open("vlm_hl/prompts/plan_reasoning/evaluate_mc_question.txt") as file:
         prompt = file.read()
     prompt = prompt.format(question=question, options=format_obj_list(options_list))
     image_b64 = encode_image_to_base64(image)
@@ -292,9 +296,7 @@ def evaluate_mc_question(question, image, options_list):
 def evaluate_open_question(question, image):
     """Ask an open-ended question about an image and return the VLM's text response."""
     print("Asking VLM the following question: ", question)
-    with open(
-        "vlm_hl/prompts/plan_reasoning/evaluate_open_question.txt", "r"
-    ) as file:
+    with open("vlm_hl/prompts/plan_reasoning/evaluate_open_question.txt") as file:
         prompt = file.read().format(question=question)
     response = vlm_call_with_image(image, prompt)
     print("VLM response: ", response)
@@ -305,17 +307,13 @@ class ObjectUids(BaseModel):
     object_uids: list[str]
 
 
-def get_object_uids_from_scene(
-    current_image: Image, task_instruction: str
-):
+def get_object_uids_from_scene(current_image: Image, task_instruction: str):
     """
     Given an image, query a VLM to identify objects in the image and output a list of objects.
     """
-    with open("vlm_hl/prompts/plan_reasoning/generate_uids.txt", "r") as file:
+    with open("vlm_hl/prompts/plan_reasoning/generate_uids.txt") as file:
         prompt = file.read()
-    prompt = prompt.format(
-        instruction=task_instruction
-    )
+    prompt = prompt.format(instruction=task_instruction)
     image_b64 = encode_image_to_base64(current_image)
     messages = [
         {
@@ -335,6 +333,7 @@ def get_object_uids_from_scene(
     parsed = _parse_structured(text, ObjectUids)
     print("Identified objects from scene: ", parsed.object_uids)
     return parsed.object_uids
+
 
 def extract_frames(video_path, frame_rate=10):
     """
@@ -380,19 +379,13 @@ def extract_frames_from_list(frame_list, frame_rate=10):
     return frames_b64
 
 
-def generate_reflexion_feedback(
-    overall_instruction, subtasks, attempt_video_frames, frame_rate=20
-):
+def generate_reflexion_feedback(overall_instruction, subtasks, attempt_video_frames, frame_rate=20):
     """
     Using a video trajectory for an unsuccessful attempt, ask for reflexion-style feedback for use in future attempts.
     """
     frames_b64 = extract_frames_from_list(attempt_video_frames, frame_rate=frame_rate)
-    with open(
-        "vlm_hl/prompts/assessment/reflexion_feedback.txt", "r", encoding="utf-8"
-    ) as f:
-        prompt = f.read().format(
-            overall_task=overall_instruction, subtask_instructions=subtasks
-        )
+    with open("vlm_hl/prompts/assessment/reflexion_feedback.txt", encoding="utf-8") as f:
+        prompt = f.read().format(overall_task=overall_instruction, subtask_instructions=subtasks)
     content = [{"type": "text", "text": prompt}]
     content.extend(
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
@@ -403,9 +396,7 @@ def generate_reflexion_feedback(
     return response.choices[0].message.content.strip()
 
 
-def build_reasoning_tuple_subdir(
-    overall_task_idx: int, attempt_idx: int, icadir: ReasoningICADir
-):
+def build_reasoning_tuple_subdir(overall_task_idx: int, attempt_idx: int, icadir: ReasoningICADir):
     """
     Build an API message structure for a robot attempt directory using ReasoningICADir.
     """
@@ -445,9 +436,7 @@ def build_reasoning_tuple_subdir(
                 "text": f"`[{att_pre}_WHAT_HAPPENED]`: {whathappened}",
             }
         )
-    content.append(
-        {"type": "text", "text": f"`[{att_pre}_REASONING]`: {reasoning}"}
-    )
+    content.append({"type": "text", "text": f"`[{att_pre}_REASONING]`: {reasoning}"})
 
     user_msg = {"role": "user", "content": content}
     return user_msg
@@ -469,9 +458,7 @@ def build_top_level_reasoning_tuple(tlicadir: TaskICADir, overall_task_idx: int)
         return []
 
     # build subtask messages
-    subtask_attempt_messages = build_multi_reasoning_tuples(
-        subtask_ica_dirs, overall_task_idx
-    )
+    subtask_attempt_messages = build_multi_reasoning_tuples(subtask_ica_dirs, overall_task_idx)
 
     # Build message content
     content = [
@@ -559,7 +546,9 @@ def build_positive_icl_examples(icl_tuples: list):
                     },
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{encode_image_to_base64(image)}"},
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encode_image_to_base64(image)}"
+                        },
                     },
                     {"type": "text", "text": f"`[INSTRUCTION_{idx}]`: {task}"},
                 ],
@@ -589,7 +578,9 @@ def build_ablation_examples(ablation_tuples: list):
                     },
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{encode_image_to_base64(image)}"},
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encode_image_to_base64(image)}"
+                        },
                     },
                     {"type": "text", "text": f"`[INSTRUCTION {idx}]`: {task}"},
                     {
@@ -625,7 +616,9 @@ def build_who_ablation_examples(ablation_tuples: list):
                     },
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{encode_image_to_base64(image)}"},
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encode_image_to_base64(image)}"
+                        },
                     },
                     {"type": "text", "text": f"`[INSTRUCTION {idx}]`: {task}"},
                     {
@@ -663,7 +656,9 @@ def build_reflexion_examples(reflexion_tuples: list):
                     },
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{encode_image_to_base64(image)}"},
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{encode_image_to_base64(image)}"
+                        },
                     },
                     {"type": "text", "text": f"`[INSTRUCTION_{idx}]`: {task}"},
                     {
@@ -685,13 +680,12 @@ def generate_program_with_reflexion_baseline(
 ):
     reflexion_tuples = [] if reflexion_tuples is None else reflexion_tuples
     with open(
-        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", "r", encoding="utf-8"
+        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", encoding="utf-8"
     ) as f:
         instruction_space = f.read()
     if len(reflexion_tuples) > 0:
         with open(
             "vlm_hl/prompts/plan_reasoning/reflexion_examples_card.txt",
-            "r",
             encoding="utf-8",
         ) as f:
             icl_examples_card = f.read()
@@ -699,7 +693,6 @@ def generate_program_with_reflexion_baseline(
         icl_examples_card = ""
     with open(
         "vlm_hl/prompts/plan_reasoning/generate_program_with_context.txt",
-        "r",
         encoding="utf-8",
     ) as f:
         unformatted_system_msg = f.read()
@@ -710,9 +703,7 @@ def generate_program_with_reflexion_baseline(
 
     # Hardware-specific instruction addendum
     content = []
-    with open(
-        "vlm_hl/prompts/plan_reasoning/format_task.txt", "r", encoding="utf-8"
-    ) as f:
+    with open("vlm_hl/prompts/plan_reasoning/format_task.txt", encoding="utf-8") as f:
         unformatted_task_prompt = f.read()
     sp_instruction_addendum = get_hardware_specific_instruction_space()
     formatted_prompt = unformatted_task_prompt.format(
@@ -746,9 +737,7 @@ def generate_program_with_reflexion_baseline(
     parsed = _parse_structured(text, VLAPlanProgram)
     llm_stats.input_tokens += response.usage.prompt_tokens
     llm_stats.output_tokens += response.usage.completion_tokens
-    formatted_code = (
-        parsed.python_code.strip("`").replace("python", "").strip()
-    )
+    formatted_code = parsed.python_code.strip("`").replace("python", "").strip()
     return formatted_code, parsed.reasoning
 
 
@@ -761,13 +750,12 @@ def generate_program_with_icl_baseline(
 ):
     icl_tuples = [] if icl_tuples is None else icl_tuples
     with open(
-        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", "r", encoding="utf-8"
+        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", encoding="utf-8"
     ) as f:
         instruction_space = f.read()
     if len(icl_tuples) > 0:
         with open(
             "vlm_hl/prompts/plan_reasoning/icl_baseline_examples_card.txt",
-            "r",
             encoding="utf-8",
         ) as f:
             icl_examples_card = f.read()
@@ -775,7 +763,6 @@ def generate_program_with_icl_baseline(
         icl_examples_card = ""
     with open(
         "vlm_hl/prompts/plan_reasoning/generate_program_with_context.txt",
-        "r",
         encoding="utf-8",
     ) as f:
         unformatted_system_msg = f.read()
@@ -786,9 +773,7 @@ def generate_program_with_icl_baseline(
 
     # Top-level user message
     content = []
-    with open(
-        "vlm_hl/prompts/plan_reasoning/format_task.txt", "r", encoding="utf-8"
-    ) as f:
+    with open("vlm_hl/prompts/plan_reasoning/format_task.txt", encoding="utf-8") as f:
         unformatted_task_prompt = f.read()
     sp_instruction_addendum = get_hardware_specific_instruction_space()
     formatted_prompt = unformatted_task_prompt.format(
@@ -822,9 +807,7 @@ def generate_program_with_icl_baseline(
     parsed = _parse_structured(text, VLAPlanProgram)
     llm_stats.input_tokens += response.usage.prompt_tokens
     llm_stats.output_tokens += response.usage.completion_tokens
-    formatted_code = (
-        parsed.python_code.strip("`").replace("python", "").strip()
-    )
+    formatted_code = parsed.python_code.strip("`").replace("python", "").strip()
     return formatted_code, parsed.reasoning
 
 
@@ -837,13 +820,12 @@ def generate_program_with_nor_ablation(
 ):
     subtask_tuples = [] if subtask_tuples is None else subtask_tuples
     with open(
-        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", "r", encoding="utf-8"
+        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", encoding="utf-8"
     ) as f:
         instruction_space = f.read()
     if len(subtask_tuples) > 0:
         with open(
             "vlm_hl/prompts/plan_reasoning/ablation_examples_card.txt",
-            "r",
             encoding="utf-8",
         ) as f:
             icl_examples_card = f.read()
@@ -851,7 +833,6 @@ def generate_program_with_nor_ablation(
         icl_examples_card = ""
     with open(
         "vlm_hl/prompts/plan_reasoning/generate_program_with_context.txt",
-        "r",
         encoding="utf-8",
     ) as f:
         unformatted_system_msg = f.read()
@@ -862,9 +843,7 @@ def generate_program_with_nor_ablation(
 
     # Top-level user message
     content = []
-    with open(
-        "vlm_hl/prompts/plan_reasoning/format_task.txt", "r", encoding="utf-8"
-    ) as f:
+    with open("vlm_hl/prompts/plan_reasoning/format_task.txt", encoding="utf-8") as f:
         unformatted_task_prompt = f.read()
     sp_instruction_addendum = get_hardware_specific_instruction_space()
     formatted_prompt = unformatted_task_prompt.format(
@@ -898,9 +877,7 @@ def generate_program_with_nor_ablation(
     parsed = _parse_structured(text, VLAPlanProgram)
     llm_stats.input_tokens += response.usage.prompt_tokens
     llm_stats.output_tokens += response.usage.completion_tokens
-    formatted_code = (
-        parsed.python_code.strip("`").replace("python", "").strip()
-    )
+    formatted_code = parsed.python_code.strip("`").replace("python", "").strip()
     return formatted_code, parsed.reasoning
 
 
@@ -913,13 +890,12 @@ def generate_program_with_who_ablation(
 ):
     subtask_tuples = [] if subtask_tuples is None else subtask_tuples
     with open(
-        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", "r", encoding="utf-8"
+        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", encoding="utf-8"
     ) as f:
         instruction_space = f.read()
     if len(subtask_tuples) > 0:
         with open(
             "vlm_hl/prompts/plan_reasoning/who_ablation_examples_card.txt",
-            "r",
             encoding="utf-8",
         ) as f:
             icl_examples_card = f.read()
@@ -927,7 +903,6 @@ def generate_program_with_who_ablation(
         icl_examples_card = ""
     with open(
         "vlm_hl/prompts/plan_reasoning/generate_program_with_context.txt",
-        "r",
         encoding="utf-8",
     ) as f:
         unformatted_system_msg = f.read()
@@ -938,9 +913,7 @@ def generate_program_with_who_ablation(
 
     # Top-level user message
     content = []
-    with open(
-        "vlm_hl/prompts/plan_reasoning/format_task.txt", "r", encoding="utf-8"
-    ) as f:
+    with open("vlm_hl/prompts/plan_reasoning/format_task.txt", encoding="utf-8") as f:
         unformatted_task_prompt = f.read()
     sp_instruction_addendum = get_hardware_specific_instruction_space()
     formatted_prompt = unformatted_task_prompt.format(
@@ -974,9 +947,7 @@ def generate_program_with_who_ablation(
     parsed = _parse_structured(text, VLAPlanProgram)
     llm_stats.input_tokens += response.usage.prompt_tokens
     llm_stats.output_tokens += response.usage.completion_tokens
-    formatted_code = (
-        parsed.python_code.strip("`").replace("python", "").strip()
-    )
+    formatted_code = parsed.python_code.strip("`").replace("python", "").strip()
     return formatted_code, parsed.reasoning
 
 
@@ -995,16 +966,18 @@ def generate_planner_program(
     no_vlm: bool = False,
 ):
     if no_vlm:
-        return f"world.act({repr(task_description)})", "no-vlm: bypassing VLM, using raw task description"
+        return (
+            f"world.act({repr(task_description)})",
+            "no-vlm: bypassing VLM, using raw task description",
+        )
 
     with open(
-        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", "r", encoding="utf-8"
+        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", encoding="utf-8"
     ) as f:
         instruction_space = f.read()
     if len(tuple_icadirs) > 0:
         with open(
             "vlm_hl/prompts/plan_reasoning/planner_examples_card.txt",
-            "r",
             encoding="utf-8",
         ) as f:
             planner_examples_card = f.read()
@@ -1013,7 +986,6 @@ def generate_planner_program(
 
     with open(
         "vlm_hl/prompts/plan_reasoning/generate_program_with_context.txt",
-        "r",
         encoding="utf-8",
     ) as f:
         unformatted_system_msg = f.read()
@@ -1024,9 +996,7 @@ def generate_planner_program(
 
     # Top-level user message
     content = []
-    with open(
-        "vlm_hl/prompts/plan_reasoning/format_task.txt", "r", encoding="utf-8"
-    ) as f:
+    with open("vlm_hl/prompts/plan_reasoning/format_task.txt", encoding="utf-8") as f:
         unformatted_task_prompt = f.read()
     sp_instruction_addendum = get_hardware_specific_instruction_space()
     formatted_prompt = unformatted_task_prompt.format(
@@ -1060,17 +1030,12 @@ def generate_planner_program(
     parsed = _parse_structured(text, VLAPlanProgram)
     llm_stats.input_tokens += response.usage.prompt_tokens
     llm_stats.output_tokens += response.usage.completion_tokens
-    formatted_code = (
-        parsed.python_code.strip("`").replace("python", "").strip()
-    )
+    formatted_code = parsed.python_code.strip("`").replace("python", "").strip()
     return formatted_code, parsed.reasoning
 
-def critique_vla_failure(
-    initial_image: Image, final_image: Image, task_description: str
-):
-    with open(
-        "vlm_hl/prompts/assessment/critique_failure_from_images.txt", "r"
-    ) as file:
+
+def critique_vla_failure(initial_image: Image, final_image: Image, task_description: str):
+    with open("vlm_hl/prompts/assessment/critique_failure_from_images.txt") as file:
         unformatted_prompt = file.read()
     formatted_prompt = unformatted_prompt.format(task_instruction=task_description)
     messages = format_two_image_message(initial_image, final_image, formatted_prompt)
@@ -1078,12 +1043,8 @@ def critique_vla_failure(
     return response.choices[0].message.content.strip()
 
 
-def critique_vla_video_failure(
-    video_frames: list, task_description: str, frame_rate=20
-):
-    with open(
-        "vlm_hl/prompts/assessment/critique_failure_from_video.txt", "r"
-    ) as file:
+def critique_vla_video_failure(video_frames: list, task_description: str, frame_rate=20):
+    with open("vlm_hl/prompts/assessment/critique_failure_from_video.txt") as file:
         unformatted_prompt = file.read()
     frames_b64 = extract_frames_from_list(video_frames, frame_rate=frame_rate)
     formatted_prompt = unformatted_prompt.format(task_instruction=task_description)
@@ -1102,7 +1063,7 @@ def format_reasoning_tuples(reasoning_tuples: list):
     for i, (subtask, success, what_happened, reasoning) in enumerate(reasoning_tuples):
         if what_happened is None:
             what_happened = "N/A"
-        formatted_tuples += f"Subtask {i+1}:\n Subtask Instruction: {subtask}\n Success?: {success}\n What Happened (if failure): {what_happened}\n Reasoning: {reasoning}\n"
+        formatted_tuples += f"Subtask {i + 1}:\n Subtask Instruction: {subtask}\n Success?: {success}\n What Happened (if failure): {what_happened}\n Reasoning: {reasoning}\n"
     return formatted_tuples
 
 
@@ -1112,11 +1073,9 @@ def assess_hl_success(
     task_description: str,
     reasoning_tuples: list,
 ):
-    with open(
-        "vlm_hl/prompts/assessment/describe_hl_success_scene.txt", "r"
-    ) as file:
+    with open("vlm_hl/prompts/assessment/describe_hl_success_scene.txt") as file:
         unformatted_prompt = file.read()
-    with open("vlm_hl/prompts/assessment/pizerofive_droid_vla_model_card.txt", "r") as file:
+    with open("vlm_hl/prompts/assessment/pizerofive_droid_vla_model_card.txt") as file:
         model_card = file.read()
     formatted_prompt = unformatted_prompt.format(
         model_card=model_card,
@@ -1134,14 +1093,12 @@ def assess_hl_failure(
     task_description: str,
     reasoning_tuples: list,
 ):
-    with open(
-        "vlm_hl/prompts/assessment/critique_hl_failure_scene.txt", "r"
-    ) as file:
+    with open("vlm_hl/prompts/assessment/critique_hl_failure_scene.txt") as file:
         unformatted_prompt = file.read()
-    with open("vlm_hl/prompts/assessment/pizerofive_droid_vla_model_card.txt", "r") as file:
+    with open("vlm_hl/prompts/assessment/pizerofive_droid_vla_model_card.txt") as file:
         model_card = file.read()
     with open(
-        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", "r", encoding="utf-8"
+        "vlm_hl/prompts/plan_reasoning/pizerofive_droid_instruction_space.txt", encoding="utf-8"
     ) as f:
         instruction_space = f.read()
     formatted_prompt = unformatted_prompt.format(
@@ -1156,21 +1113,15 @@ def assess_hl_failure(
 
 
 def describe_vla_success(initial_image: Image, task_description: str):
-    with open(
-        "vlm_hl/prompts/assessment/describe_success_scene.txt", "r"
-    ) as file:
+    with open("vlm_hl/prompts/assessment/describe_success_scene.txt") as file:
         unformatted_prompt = file.read()
     formatted_prompt = unformatted_prompt.format(task_instruction=task_description)
     response = vlm_call_with_image(initial_image, formatted_prompt, model=text_model)
     return response
 
 
-def determine_vla_success(
-    initial_image: Image, final_image: Image, task_description: str
-):
-    with open(
-        "vlm_hl/prompts/assessment/determine_success_from_images.txt", "r"
-    ) as file:
+def determine_vla_success(initial_image: Image, final_image: Image, task_description: str):
+    with open("vlm_hl/prompts/assessment/determine_success_from_images.txt") as file:
         unformatted_prompt = file.read()
     formatted_prompt = unformatted_prompt.format(task_instruction=task_description)
     messages = format_two_image_message(initial_image, final_image, formatted_prompt)
@@ -1181,13 +1132,11 @@ def determine_vla_success(
     return parsed.answer
 
 
-def reason_about_vla_failure(
-    initial_image: Image, task_description: str, what_happened: str
-):
-    with open("vlm_hl/prompts/assessment/reason_about_failure.txt", "r") as file:
+def reason_about_vla_failure(initial_image: Image, task_description: str, what_happened: str):
+    with open("vlm_hl/prompts/assessment/reason_about_failure.txt") as file:
         unformatted_prompt = file.read()
 
-    with open("vlm_hl/prompts/assessment/pizerofive_droid_vla_model_card.txt", "r") as file:
+    with open("vlm_hl/prompts/assessment/pizerofive_droid_vla_model_card.txt") as file:
         model_card = file.read()
     formatted_prompt = unformatted_prompt.format(
         model_card=model_card,
@@ -1199,9 +1148,7 @@ def reason_about_vla_failure(
     return response
 
 
-def format_two_image_message(
-    initial_image: Image, final_image: Image, formatted_prompt: str
-):
+def format_two_image_message(initial_image: Image, final_image: Image, formatted_prompt: str):
     initial_image_b64 = encode_image_to_base64(initial_image)
     final_image_b64 = encode_image_to_base64(final_image)
     messages = [

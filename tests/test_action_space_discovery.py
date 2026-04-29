@@ -7,7 +7,6 @@ Uses unittest.mock to mock HTTP responses — no real sims or VLAs needed.
 
 import base64
 from io import BytesIO
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -17,7 +16,6 @@ from sims.env_wrapper import (
     SimWrapper,
     _apply_image_transform,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -64,10 +62,8 @@ def _make_sim_info(
             "applied_in_sim", meaning the sim applies the LIBERO flip.
     """
     cam_list = []
-    for role in (cameras or ["primary"]):
-        cam_list.append(
-            {"key": f"{role}_image", "resolution": [256, 256], "role": role}
-        )
+    for role in cameras or ["primary"]:
+        cam_list.append({"key": f"{role}_image", "resolution": [256, 256], "role": role})
     action_space = {"type": action_type, "dim": action_dim}
     if accepted_dims is not None:
         action_space["accepted_dims"] = accepted_dims
@@ -312,6 +308,7 @@ class TestImageTransform:
     def test_image_transform_flip_hw_raises_when_sim_applied_in_sim(self, monkeypatch):
         """VLA 'flip_hw' + sim 'applied_in_sim' → SpecMismatchError (double flip)."""
         from sims.env_wrapper import SpecMismatchError
+
         vla = _make_vla_info(image_transform="flip_hw")
         sim = _make_sim_info()  # sim default: applied_in_sim
         with pytest.raises(SpecMismatchError, match="double flip"):
@@ -320,6 +317,7 @@ class TestImageTransform:
     def test_image_transform_flip_hw_raises_when_sim_none(self, monkeypatch):
         """VLA 'flip_hw' + sim 'none' → SpecMismatchError."""
         from sims.env_wrapper import SpecMismatchError
+
         vla = _make_vla_info(image_transform="flip_hw")
         sim = _make_sim_info(image_transform="none")
         with pytest.raises(SpecMismatchError, match="image_transform conflict"):
@@ -411,7 +409,9 @@ class TestCompatibilityMatrix:
         """
         # Use a Cosmos-like VLA that matches RoboCasa's state_dim=9
         vla = _make_vla_info(
-            action_type="eef_delta", action_dim=7, state_dim=9,
+            action_type="eef_delta",
+            action_dim=7,
+            state_dim=9,
             cameras=["primary", "wrist"],
         )
         w = _make_wrapper(vla, self._robocasa_info(), monkeypatch)
@@ -420,17 +420,13 @@ class TestCompatibilityMatrix:
 
     def test_internvla_robotwin_compatible(self, monkeypatch):
         """Joint-position VLA + RoboTwin (joint_pos/14) → OK."""
-        w = _make_wrapper(
-            self._internvla_info(), self._robotwin_info(), monkeypatch
-        )
+        w = _make_wrapper(self._internvla_info(), self._robotwin_info(), monkeypatch)
         assert w.action_dim == 14
 
     def test_internvla_libero_incompatible(self, monkeypatch):
         """Joint-position VLA + LIBERO (eef_delta/7) → ValueError."""
         with pytest.raises(ValueError, match="type mismatch"):
-            _make_wrapper(
-                self._internvla_info(), self._libero_info(), monkeypatch
-            )
+            _make_wrapper(self._internvla_info(), self._libero_info(), monkeypatch)
 
 
 # ======================================================================
@@ -445,7 +441,9 @@ class TestAcceptedDims:
         """VLA dim=7, sim accepted_dims=[7,12] → OK."""
         vla = _make_vla_info(action_type="eef_delta", action_dim=7)
         sim = _make_sim_info(
-            action_type="eef_delta", action_dim=12, accepted_dims=[7, 12],
+            action_type="eef_delta",
+            action_dim=12,
+            accepted_dims=[7, 12],
         )
         w = _make_wrapper(vla, sim, monkeypatch)
         assert w._policy_action_space["dim"] == 7
@@ -455,7 +453,9 @@ class TestAcceptedDims:
         """VLA dim=12, sim accepted_dims=[7,12] → OK."""
         vla = _make_vla_info(action_type="eef_delta", action_dim=12, state_dim=9)
         sim = _make_sim_info(
-            action_type="eef_delta", action_dim=12, state_dim=9,
+            action_type="eef_delta",
+            action_dim=12,
+            state_dim=9,
             accepted_dims=[7, 12],
         )
         w = _make_wrapper(vla, sim, monkeypatch)
@@ -466,7 +466,9 @@ class TestAcceptedDims:
         """VLA dim=9, sim accepted_dims=[7,12] → ValueError."""
         vla = _make_vla_info(action_type="eef_delta", action_dim=9)
         sim = _make_sim_info(
-            action_type="eef_delta", action_dim=12, accepted_dims=[7, 12],
+            action_type="eef_delta",
+            action_dim=12,
+            accepted_dims=[7, 12],
         )
         with pytest.raises(ValueError, match="dim mismatch"):
             _make_wrapper(vla, sim, monkeypatch)

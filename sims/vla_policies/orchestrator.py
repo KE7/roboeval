@@ -41,6 +41,7 @@ Usage
         app = make_app(policy, model_id, device="cuda")
         uvicorn.run(app, port=5102)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -129,6 +130,7 @@ def decide_gpu_mode(
 
     try:
         import torch
+
         n_gpus = torch.cuda.device_count()
     except ImportError:
         logger.warning("PyTorch not importable — defaulting to SINGLE mode.")
@@ -151,8 +153,7 @@ def decide_gpu_mode(
 
     # Query VRAM per GPU
     vram_per_gpu = [
-        torch.cuda.get_device_properties(i).total_memory / (1024 ** 3)
-        for i in range(n_gpus)
+        torch.cuda.get_device_properties(i).total_memory / (1024**3) for i in range(n_gpus)
     ]
     min_vram = min(vram_per_gpu)
 
@@ -164,7 +165,10 @@ def decide_gpu_mode(
         logger.info(
             "decide_gpu_mode → REPLICAS  (model=%.1f GB, min_vram=%.1f GB, "
             "n_replicas=%d, force=%s)",
-            model_size_gb, min_vram, n_replicas, force_replicas,
+            model_size_gb,
+            min_vram,
+            n_replicas,
+            force_replicas,
         )
         return GPUMode.REPLICAS, {"gpu_ids": gpu_ids, "n_replicas": n_replicas}
 
@@ -172,7 +176,9 @@ def decide_gpu_mode(
     logger.info(
         "decide_gpu_mode → SINGLE  (model=%.1f GB, min_vram=%.1f GB — "
         "%.0f%% utilisation per GPU; TP not implemented)",
-        model_size_gb, min_vram, 100.0 * model_size_gb / min_vram,
+        model_size_gb,
+        min_vram,
+        100.0 * model_size_gb / min_vram,
     )
     return GPUMode.SINGLE, {"gpu_ids": [gpu_ids[0]], "n_replicas": 1}
 
@@ -255,17 +261,25 @@ class ReplicaOrchestrator:
             env = {**env_base, "CUDA_VISIBLE_DEVICES": str(gpu_id)}
             proc = subprocess.Popen(
                 [
-                    "python", "-m", self.script_module,
-                    "--model-id", self.model_id,
-                    "--port", str(port),
-                    "--device", "cuda",
+                    "python",
+                    "-m",
+                    self.script_module,
+                    "--model-id",
+                    self.model_id,
+                    "--port",
+                    str(port),
+                    "--device",
+                    "cuda",
                 ],
                 env=env,
             )
             self._procs.append(proc)
             logger.info(
                 "Spawned replica %d: PID=%d  port=%d  CUDA_VISIBLE_DEVICES=%d",
-                i, proc.pid, port, gpu_id,
+                i,
+                proc.pid,
+                port,
+                gpu_id,
             )
 
     def stop(self) -> None:
@@ -308,7 +322,9 @@ class ReplicaOrchestrator:
         """
         self._ensure_async_state()
         deadline = time.monotonic() + timeout
-        logger.info("Waiting for %d replicas to become ready (timeout=%.0fs)…", self.n_replicas, timeout)
+        logger.info(
+            "Waiting for %d replicas to become ready (timeout=%.0fs)…", self.n_replicas, timeout
+        )
         while time.monotonic() < deadline:
             try:
                 statuses = await asyncio.gather(
@@ -316,9 +332,7 @@ class ReplicaOrchestrator:
                     return_exceptions=True,
                 )
                 all_ready = all(
-                    isinstance(s, httpx.Response)
-                    and s.status_code == 200
-                    and s.json().get("ready")
+                    isinstance(s, httpx.Response) and s.status_code == 200 and s.json().get("ready")
                     for s in statuses
                 )
                 if all_ready:
@@ -362,7 +376,9 @@ class ReplicaOrchestrator:
         )
         errors = [str(r) for r in results if isinstance(r, Exception)]
         if errors:
-            logger.warning("reset: %d/%d replicas errored: %s", len(errors), self.n_replicas, errors)
+            logger.warning(
+                "reset: %d/%d replicas errored: %s", len(errors), self.n_replicas, errors
+            )
         return {
             "success": len(errors) == 0,
             "n_replicas": self.n_replicas,
@@ -431,16 +447,11 @@ def make_replica_app(
         orchestrator._ensure_async_state()
         try:
             statuses = await asyncio.gather(
-                *[
-                    orchestrator._client.get(f"{url}/health")
-                    for url in orchestrator.replica_urls
-                ],
+                *[orchestrator._client.get(f"{url}/health") for url in orchestrator.replica_urls],
                 return_exceptions=True,
             )
             all_ready = all(
-                isinstance(s, httpx.Response)
-                and s.status_code == 200
-                and s.json().get("ready")
+                isinstance(s, httpx.Response) and s.status_code == 200 and s.json().get("ready")
                 for s in statuses
             )
         except Exception:

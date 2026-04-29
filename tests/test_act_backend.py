@@ -15,15 +15,14 @@ These tests run without GPU / lerobot installed.  They verify:
     are ``ActionObsSpec`` instances (not raw dicts) so validation can inspect
     their fields.
 """
+
 from __future__ import annotations
 
 import importlib
 import sys
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,8 +50,8 @@ def _import_act_policy():
         if mod not in sys.modules:
             sys.modules[mod] = MagicMock()
 
-    # Ensure the robo_eval.specs constants are importable.
-    import robo_eval.specs  # noqa: F401
+    # Ensure the roboeval.specs constants are importable.
+    import roboeval.specs
 
     if "sims.vla_policies.act_policy" in sys.modules:
         del sys.modules["sims.vla_policies.act_policy"]
@@ -86,29 +85,19 @@ class TestABCCompliance:
     def test_is_vla_policy_base_subclass(self, policy_cls):
         from sims.vla_policies.base import VLAPolicyBase
 
-        assert issubclass(policy_cls, VLAPolicyBase), (
-            "ACTPolicy must subclass VLAPolicyBase"
-        )
+        assert issubclass(policy_cls, VLAPolicyBase), "ACTPolicy must subclass VLAPolicyBase"
 
     def test_load_model_declared(self, policy_cls):
-        assert callable(getattr(policy_cls, "load_model", None)), (
-            "load_model must be implemented"
-        )
+        assert callable(getattr(policy_cls, "load_model", None)), "load_model must be implemented"
 
     def test_predict_declared(self, policy_cls):
-        assert callable(getattr(policy_cls, "predict", None)), (
-            "predict must be implemented"
-        )
+        assert callable(getattr(policy_cls, "predict", None)), "predict must be implemented"
 
     def test_get_info_declared(self, policy_cls):
-        assert callable(getattr(policy_cls, "get_info", None)), (
-            "get_info must be implemented"
-        )
+        assert callable(getattr(policy_cls, "get_info", None)), "get_info must be implemented"
 
     def test_reset_declared(self, policy_cls):
-        assert callable(getattr(policy_cls, "reset", None)), (
-            "reset must be implemented"
-        )
+        assert callable(getattr(policy_cls, "reset", None)), "reset must be implemented"
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +118,7 @@ class TestActionSpec:
         )
 
     def test_joint_pos_is_action_obs_spec(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
 
         spec = policy_instance.get_action_spec()
         assert isinstance(spec["joint_pos"], ActionObsSpec), (
@@ -168,7 +157,7 @@ class TestObservationSpec:
         assert isinstance(obs, dict), "get_observation_spec() must return a dict"
 
     def test_has_primary_camera(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
 
         obs = policy_instance.get_observation_spec()
         assert "primary" in obs, "obs spec must declare a 'primary' camera"
@@ -178,7 +167,7 @@ class TestObservationSpec:
         )
 
     def test_has_state(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
 
         obs = policy_instance.get_observation_spec()
         assert "state" in obs, "obs spec must declare a 'state' entry"
@@ -189,7 +178,7 @@ class TestObservationSpec:
         )
 
     def test_has_instruction(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
 
         obs = policy_instance.get_observation_spec()
         assert "instruction" in obs, (
@@ -198,7 +187,7 @@ class TestObservationSpec:
         assert isinstance(obs["instruction"], ActionObsSpec)
 
     def test_all_entries_are_action_obs_spec(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
 
         obs = policy_instance.get_observation_spec()
         for key, val in obs.items():
@@ -281,7 +270,7 @@ class TestSpecContract:
     """
 
     def test_action_spec_values_typed(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
 
         for key, val in policy_instance.get_action_spec().items():
             assert isinstance(val, ActionObsSpec), (
@@ -289,7 +278,7 @@ class TestSpecContract:
             )
 
     def test_obs_spec_values_typed(self, policy_instance):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
 
         for key, val in policy_instance.get_observation_spec().items():
             assert isinstance(val, ActionObsSpec), (
@@ -318,9 +307,6 @@ class TestModuleSmoke:
 
     def test_default_port_5107(self):
         """Default port must be 5107 (avoids collision with other VLA servers)."""
-        import importlib
-
-        mod = importlib.import_module("sims.vla_policies.act_policy")
         # Parse the argparser default.
         import argparse
 

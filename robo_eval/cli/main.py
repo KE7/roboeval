@@ -1,30 +1,32 @@
-"""robo-eval CLI — 4-subcommand interface for the roboeval platform.
+"""roboeval CLI — 5-subcommand interface for the roboeval platform.
 
 Subcommands:
+    setup  — install backend environments via scripts/setup.sh
     run    — run sharded evaluation via the Orchestrator
     serve  — launch VLA + sim_worker servers
     merge  — merge shard result JSON files
     test   — preflight checks (validate / server / benchmark / all)
 
 Philosophy:
-    - No ``--runtime docker``, no ``ROBO_EVAL_DOCKER_*`` env vars.
+    - No ``--runtime docker``, no ``ROBOEVAL_DOCKER_*`` env vars.
     - No ``--proxy-port``, no ``--replicas``.
     - All config via flat YAML + optional CLI overrides.
     - VLA_URL is forwarded via environment to subprocesses.
 
 Usage examples:
-    robo-eval run --config configs/libero_spatial_pi05_smoke.yaml
-    robo-eval run --config configs/libero_spatial_pi05_smoke.yaml --shard-id 0 --num-shards 4
-    robo-eval serve --vla pi05 --sim libero
-    robo-eval merge --pattern 'results/*_shard*.json' -o final.json
-    robo-eval test --validate --config configs/libero_spatial_pi05_smoke.yaml
-    robo-eval test --all --config configs/libero_spatial_pi05_smoke.yaml
+    roboeval run --config configs/libero_spatial_pi05_smoke.yaml
+    roboeval run --config configs/libero_spatial_pi05_smoke.yaml --shard-id 0 --num-shards 4
+    roboeval serve --vla pi05 --sim libero
+    roboeval merge --pattern 'results/*_shard*.json' -o final.json
+    roboeval test --validate --config configs/libero_spatial_pi05_smoke.yaml
+    roboeval test --all --config configs/libero_spatial_pi05_smoke.yaml
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -32,10 +34,10 @@ from typing import Optional
 import typer
 
 app = typer.Typer(
-    name="robo-eval",
+    name="roboeval",
     help=(
-        "robo-eval: host-process VLA evaluation harness.\n\n"
-        "Use 'robo-eval <COMMAND> --help' for subcommand options."
+        "roboeval: host-process VLA evaluation harness.\n\n"
+        "Use 'roboeval <COMMAND> --help' for subcommand options."
     ),
     add_completion=False,
     no_args_is_help=True,
@@ -51,8 +53,106 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
+SETUP_COMPONENTS = (
+    "pi05 openvla smolvla groot internvla act diffusion_policy tdmpc2 "
+    "vqbet libero libero_pro libero_infinity robocasa robotwin aloha_gym "
+    "gym_pusht metaworld vlm"
+)
+
+
+def _find_setup_script() -> Path:
+    package_dir = Path(__file__).resolve().parents[1]
+    candidates = (
+        package_dir.parent / "scripts" / "setup.sh",
+        package_dir / "scripts" / "setup.sh",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError("scripts/setup.sh")
+
+
+def _resolve_serve_ports(
+    *,
+    vla: str,
+    sim: Optional[str],
+    vla_port: Optional[int],
+    sim_port: Optional[int],
+) -> tuple[int | None, int | None]:
+    """Resolve serve ports, auto-selecting free defaults when omitted."""
+    from roboeval.config import (
+        find_available_port,
+        find_available_port_block,
+        is_port_available,
+        validate_port,
+    )
+    from roboeval.server_runner import _SIM_DEFAULT_PORTS, _VLA_DEFAULT_PORTS
+
+    vla_default = _VLA_DEFAULT_PORTS.get(vla, 5100)
+    sim_default = _SIM_DEFAULT_PORTS.get(sim, 5300) if sim else None
+
+    if vla_port is not None:
+        vla_port = validate_port(vla_port, "--vla-port")
+        if not is_port_available(vla_port):
+            raise RuntimeError(f"--vla-port {vla_port} is already in use.")
+
+    if sim_port is not None:
+        sim_port = validate_port(sim_port, "--sim-port")
+        if not is_port_available(sim_port):
+            raise RuntimeError(f"--sim-port {sim_port} is already in use.")
+
+    if vla_port is None and sim_port is None and sim_default == vla_default:
+        base = find_available_port_block(2, preferred_start=vla_default)
+        return base, base + 1
+
+    if vla_port is None:
+        vla_port = find_available_port(vla_default)
+    if sim and sim_port is None:
+        sim_port = find_available_port(sim_default)
+
+    return vla_port, sim_port
+
+
 # ---------------------------------------------------------------------------
-# robo-eval run
+# roboeval setup
+# ---------------------------------------------------------------------------
+
+
+@app.command(
+    "setup",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def cmd_setup(
+    ctx: typer.Context,
+    components: Optional[list[str]] = typer.Argument(
+        None,
+        metavar="[COMPONENT]...",
+        help=f"Components to set up. Supported: {SETUP_COMPONENTS}",
+    ),
+) -> None:
+    """Install backend environments via scripts/setup.sh.
+
+    Supported components:
+    pi05 openvla smolvla groot internvla act diffusion_policy tdmpc2 vqbet
+    libero libero_pro libero_infinity robocasa robotwin aloha_gym gym_pusht
+    metaworld vlm
+    """
+    args = [*(components or []), *ctx.args]
+    try:
+        setup_script = _find_setup_script()
+    except FileNotFoundError:
+        typer.echo(
+            "Error: bundled setup script not found: scripts/setup.sh",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    result = subprocess.run(["bash", str(setup_script), *args], check=False)
+    raise typer.Exit(result.returncode)
+
+
+# ---------------------------------------------------------------------------
+# roboeval run
 # ---------------------------------------------------------------------------
 
 
@@ -95,11 +195,11 @@ def cmd_run(
 
     Examples::
 
-        robo-eval run --config configs/libero_spatial_pi05_smoke.yaml
-        robo-eval run -c configs/libero_spatial_pi05_smoke.yaml --shard-id 0 --num-shards 4
+        roboeval run --config configs/libero_spatial_pi05_smoke.yaml
+        roboeval run -c configs/libero_spatial_pi05_smoke.yaml --shard-id 0 --num-shards 4
     """
     _setup_logging(verbose)
-    logger = logging.getLogger("robo_eval.cli.run")
+    logger = logging.getLogger("roboeval.cli.run")
 
     # Validate shard args
     if (shard_id is None) != (num_shards is None):
@@ -117,7 +217,7 @@ def cmd_run(
         raise typer.Exit(1)
 
     try:
-        from robo_eval.orchestrator import EvalConfig, Orchestrator
+        from roboeval.orchestrator import EvalConfig, Orchestrator
     except ImportError as e:
         typer.echo(f"Error: failed to import orchestrator: {e}", err=True)
         raise typer.Exit(1)
@@ -142,7 +242,7 @@ def cmd_run(
         extra_env["VLA_URL"] = resolved_vla_url
         cfg.vla_url = resolved_vla_url
 
-    typer.echo(f"robo-eval run: config={config} shard={shard_id}/{num_shards}")
+    typer.echo(f"roboeval run: config={config} shard={shard_id}/{num_shards}")
     typer.echo(f"  output_dir={cfg.output_dir}  vla_url={cfg.vla_url}")
 
     orch = Orchestrator(
@@ -169,7 +269,7 @@ def cmd_run(
 
 
 # ---------------------------------------------------------------------------
-# robo-eval serve
+# roboeval serve
 # ---------------------------------------------------------------------------
 
 
@@ -225,13 +325,24 @@ def cmd_serve(
 
     Examples::
 
-        robo-eval serve --vla pi05
-        robo-eval serve --vla pi05 --sim libero --headless
-        robo-eval serve --vla smolvla --sim libero_object --vla-port 5101
+        roboeval serve --vla pi05
+        roboeval serve --vla pi05 --sim libero --headless
+        roboeval serve --vla smolvla --sim libero_object --vla-port 5101
     """
     _setup_logging(verbose)
 
-    from robo_eval.server_runner import install_signal_handlers, start_vla, start_sim, wait_for_exit
+    from roboeval.server_runner import install_signal_handlers, start_vla, start_sim, wait_for_exit
+
+    try:
+        resolved_vla_port, resolved_sim_port = _resolve_serve_ports(
+            vla=vla,
+            sim=sim,
+            vla_port=vla_port,
+            sim_port=sim_port,
+        )
+    except (ValueError, RuntimeError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
 
     # Install signal handlers here (CLI entry point owns the process lifecycle).
     install_signal_handlers()
@@ -243,7 +354,7 @@ def cmd_serve(
     try:
         vla_proc = start_vla(
             vla_name=vla,
-            port=vla_port,
+            port=resolved_vla_port,
             venv_path=vla_venv,
             model_id=model_id,
             logs_dir=logs_dir,
@@ -261,7 +372,7 @@ def cmd_serve(
         try:
             sim_proc = start_sim(
                 backend=sim,
-                port=sim_port,
+                port=resolved_sim_port,
                 venv_path=sim_venv,
                 headless=headless,
                 logs_dir=logs_dir,
@@ -278,7 +389,7 @@ def cmd_serve(
 
 
 # ---------------------------------------------------------------------------
-# robo-eval merge
+# roboeval merge
 # ---------------------------------------------------------------------------
 
 
@@ -305,12 +416,12 @@ def cmd_merge(
 
     Examples::
 
-        robo-eval merge --pattern 'results/*_shard*.json' -o final.json
-        robo-eval merge -p 'results/run_*shard*.json' -o results/merged.json
+        roboeval merge --pattern 'results/*_shard*.json' -o final.json
+        roboeval merge -p 'results/run_*shard*.json' -o results/merged.json
     """
     _setup_logging(verbose)
 
-    from robo_eval.results.merge import (
+    from roboeval.results.merge import (
         find_shard_files,
         load_shard_files,
         merge_shards,
@@ -356,7 +467,7 @@ def cmd_merge(
 
 
 # ---------------------------------------------------------------------------
-# robo-eval test
+# roboeval test
 # ---------------------------------------------------------------------------
 
 
@@ -401,9 +512,9 @@ def cmd_test(
 
     Examples::
 
-        robo-eval test --validate --config configs/libero_spatial_pi05_smoke.yaml
-        robo-eval test --server --config configs/libero_spatial_pi05_smoke.yaml
-        robo-eval test --all --config configs/libero_spatial_pi05_smoke.yaml
+        roboeval test --validate --config configs/libero_spatial_pi05_smoke.yaml
+        roboeval test --server --config configs/libero_spatial_pi05_smoke.yaml
+        roboeval test --all --config configs/libero_spatial_pi05_smoke.yaml
     """
     _setup_logging(verbose)
 
@@ -429,7 +540,7 @@ def cmd_test(
         typer.echo("Error: --config is required.", err=True)
         raise typer.Exit(1)
 
-    from robo_eval.preflight import run_preflight
+    from roboeval.preflight import run_preflight
 
     exit_code = run_preflight(
         config_path=config,
@@ -446,12 +557,12 @@ def cmd_test(
 
 def _run_validate_no_config() -> None:
     """Run basic ActionObsSpec + registry smoke tests without a config file."""
-    from robo_eval.preflight import _check, print_results
+    from roboeval.preflight import _check, print_results
     results = []
 
     # ActionObsSpec round-trip
     try:
-        from robo_eval.specs import POSITION_DELTA, ROTATION_AA, GRIPPER_CLOSE_POS, ActionObsSpec
+        from roboeval.specs import POSITION_DELTA, ROTATION_AA, GRIPPER_CLOSE_POS, ActionObsSpec
         for spec in [POSITION_DELTA, ROTATION_AA, GRIPPER_CLOSE_POS]:
             d2 = spec.to_dict()
             spec2 = ActionObsSpec.from_dict(d2)
@@ -462,8 +573,8 @@ def _run_validate_no_config() -> None:
 
     # Registry import
     try:
-        from robo_eval.registry import resolve_import_string
-        cls = resolve_import_string("robo_eval.specs:ActionObsSpec")
+        from roboeval.registry import resolve_import_string
+        cls = resolve_import_string("roboeval.specs:ActionObsSpec")
         assert cls.__name__ == "ActionObsSpec"
         results.append(_check("registry.import", True))
     except Exception as e:
@@ -471,14 +582,14 @@ def _run_validate_no_config() -> None:
 
     # Orchestrator importable
     try:
-        from robo_eval.orchestrator import Orchestrator, EvalConfig  # noqa: F401
+        from roboeval.orchestrator import Orchestrator, EvalConfig
         results.append(_check("orchestrator.import", True))
     except Exception as e:
         results.append(_check("orchestrator.import", False, str(e)))
 
     # Results modules importable
     try:
-        from robo_eval.results import ResultCollector, merge_shards  # noqa: F401
+        from roboeval.results import ResultCollector, merge_shards
         results.append(_check("results.import", True))
     except Exception as e:
         results.append(_check("results.import", False, str(e)))
@@ -499,7 +610,7 @@ def _run_validate_no_config() -> None:
 
 
 def main() -> None:
-    """Entry point for the ``robo-eval`` console script."""
+    """Entry point for the ``roboeval`` console script."""
     app()
 
 

@@ -20,6 +20,7 @@ Callers see no API change — single ``/predict`` requests work as before.
 
 When ``max_batch_size == 1`` (the default), no queue overhead is added.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -57,7 +58,7 @@ def detect_lerobot_image_transform(model_id: str, policy: Any = None) -> str:
     """
     short = model_id.split("/")[-1] if "/" in model_id else model_id
     try:
-        from lerobot.processor.env_processor import LiberoProcessorStep  # noqa: F401
+        from lerobot.processor.env_processor import LiberoProcessorStep
     except ImportError:
         logger.info("[%s] LiberoProcessorStep unavailable — image_transform=none", short)
         return "none"
@@ -125,8 +126,9 @@ class VLAPolicyBase(ABC):
 
     def reset(self) -> None:
         """Reset per-episode state (default: no-op)."""
+        return None
 
-    def get_action_spec(self) -> "dict[str, ActionObsSpec] | None":
+    def get_action_spec(self) -> dict[str, ActionObsSpec] | None:
         """Return the action spec (what this VLA produces).
 
         Returns a mapping of component name → ``ActionObsSpec``, or ``None`` if this
@@ -135,7 +137,7 @@ class VLAPolicyBase(ABC):
         """
         return None
 
-    def get_observation_spec(self) -> "dict[str, ActionObsSpec] | None":
+    def get_observation_spec(self) -> dict[str, ActionObsSpec] | None:
         """Return the observation spec (what this VLA expects as input).
 
         Returns a mapping of component name → ``ActionObsSpec``, or ``None`` if this
@@ -238,7 +240,7 @@ class BatchQueue:
                 try:
                     item = await asyncio.wait_for(self._queue.get(), timeout=remaining)
                     batch.append(item)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     break
 
             obs_list = [obs for obs, _ in batch]
@@ -247,16 +249,16 @@ class BatchQueue:
             logger.info("BatchQueue.drain_loop: dispatching batch_size=%d", len(batch))
             # Run batched inference in thread pool so the event loop stays free
             try:
-                # Capture obs_list now (new local per iteration)
-                _obs_list = obs_list
                 actions_list: list[list[list[float]]] = await loop.run_in_executor(
-                    None, lambda: self._policy.predict_batch(_obs_list)
+                    None, self._policy.predict_batch, obs_list
                 )
-                for fut, actions in zip(futs, actions_list):
+                for fut, actions in zip(futs, actions_list, strict=False):
                     if not fut.done():
                         fut.set_result(actions)
             except Exception as exc:
-                logger.exception("BatchQueue.drain_loop: predict_batch failed (batch=%d)", len(batch))
+                logger.exception(
+                    "BatchQueue.drain_loop: predict_batch failed (batch=%d)", len(batch)
+                )
                 for fut in futs:
                     if not fut.done():
                         fut.set_exception(exc)
@@ -319,7 +321,9 @@ def make_app(
         )
         logger.info(
             "BatchQueue enabled: max_batch_size=%d, max_wait_ms=%.1f (supports_batching=%s)",
-            max_batch_size, max_wait_ms, policy.supports_batching,
+            max_batch_size,
+            max_wait_ms,
+            policy.supports_batching,
         )
 
     @asynccontextmanager
