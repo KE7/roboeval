@@ -1,0 +1,54 @@
+# robo-eval run configuration
+# Usage: robo-eval run --config examples/eval.yaml
+# All keys are optional; CLI flags and environment variables always override YAML values.
+#
+# Minimal equivalent command:
+#   robo-eval run --config examples/eval.yaml
+#
+# For a quick validation (no server required):
+#   robo-eval test --validate --config examples/eval.yaml
+
+# ── Run name ──────────────────────────────────────────────────────────────────
+name: my_eval              # Human-readable label; used in the output filename.
+
+# ── VLA server ────────────────────────────────────────────────────────────────
+# Start the VLA server first:  robo-eval serve --vla pi05
+# Then point this config at it (or export VLA_URL before running).
+vla_url: http://localhost:5100   # URL of the running VLA policy server.
+
+# ── Simulator server ──────────────────────────────────────────────────────────
+# Start the sim first:  robo-eval serve --vla pi05 --sim libero
+sim_url: http://localhost:5300   # URL of the running sim_worker.
+sim: libero                      # Simulator backend (libero | libero_pro | libero_infinity
+                                 #                    | robocasa | robotwin).
+
+# ── Task selection ────────────────────────────────────────────────────────────
+suite: libero_spatial            # Fully-qualified suite name.
+                                 # Auto-detected benchmark: libero, libero_pro, …
+                                 # Comma-separated for multiple: libero_spatial,libero_goal
+# tasks: [0, 1, 2]              # Explicit task indices (default: all tasks in suite).
+# max_tasks: 3                  # Limit to first N tasks (useful for smoke runs).
+
+# ── Episodes ──────────────────────────────────────────────────────────────────
+episodes_per_task: 10            # How many episodes to run per task (--episodes).
+
+# ── Evaluation mode ───────────────────────────────────────────────────────────
+# Direct mode (no VLM planner) — set no_vlm: true (the default).
+no_vlm: true                     # true  = VLA only (direct policy evaluation)
+                                 # false = full VLM + VLA hierarchical pipeline
+
+# Hierarchical planner settings (only used when no_vlm: false):
+# vlm_model: provider/model-name                 # LiteLLM model string for the VLM planner.
+# vlm_endpoint: localhost:4000                   # LiteLLM proxy endpoint.
+
+# ── Action space ──────────────────────────────────────────────────────────────
+delta_actions: true              # Use delta end-effector control (default: true).
+                                 # Set false only for absolute-pose action spaces.
+
+# ── Output ────────────────────────────────────────────────────────────────────
+output_dir: ./results            # Directory for per-episode JSON and shard result file.
+
+# ── Extra parameters forwarded to run_sim_eval.py ─────────────────────────────
+# params:
+#   seed: 42                     # Random seed (default: auto-generated and logged).
+#   action_ensemble: newest      # Action chunk blending strategy.

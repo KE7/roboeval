@@ -273,7 +273,7 @@ setup_libero_infinity() {
             "$PIP" install -e "$CLONE_DIR/vendor/libero"
         fi
     else
-        # Standard mode: install from GitHub release
+        # Standard mode: install from the public repository
         "$PIP" install "libero-infinity @ git+https://github.com/KE7/libero-infinity.git"
         # Also install LIBERO (required runtime dependency)
         "$PIP" install "libero @ git+https://github.com/Lifelong-Robot-Learning/LIBERO.git"
