@@ -1,18 +1,47 @@
 cff-version: 1.2.0
-title: robo-eval
 message: >-
   If you use this software, please cite it using the metadata from this file.
 type: software
+title: "roboeval: A reproducible evaluation harness for Vision-Language-Action models."
 authors:
   - family-names: Elmaaroufi
     given-names: Karim
-    email: elmaaroufi@berkeley.edu
+    email: k.e@berkeley.edu
+    affiliation: University of California, Berkeley
   - name: OMAR
-  - family-names: Zaharia
-    given-names: Matei
+    affiliation: ""
   - family-names: Seshia
     given-names: Sanjit A.
-repository-code: https://github.com/KE7/robo-eval
-license: MIT
+    affiliation: University of California, Berkeley
+  - family-names: Zaharia
+    given-names: Matei
+    affiliation: University of California, Berkeley
 version: 0.1.0
-date-released: 2026-03-15
+date-released: "2026-04-29"
+license: BSD-3-Clause
+repository-code: https://github.com/KE7/roboeval
+keywords:
+  - robotics
+  - evaluation
+  - vision-language-action
+  - benchmark
+references:
+  - type: article
+    title: "Learning Affordances at Inference-Time for Vision-Language-Action Models"
+    authors:
+      - family-names: Shah
+        given-names: Ameesh
+      - family-names: Chen
+        given-names: William
+      - family-names: Godbole
+        given-names: Adwait
+      - family-names: Mora
+        given-names: Federico
+      - family-names: Seshia
+        given-names: Sanjit A.
+      - family-names: Levine
+        given-names: Sergey
+    year: 2025
+    journal: "arXiv preprint arXiv:2510.19752"
+    url: "https://arxiv.org/abs/2510.19752"
+    notes: "LITEN planner method integrated by roboeval's hierarchical evaluation mode."

@@ -2,7 +2,8 @@
 
 [LIBERO-Infinity](https://github.com/KE7/libero-infinity) uses [Scenic 3](https://scenic-lang.readthedocs.io/) probabilistic programs to generate **infinite test distributions** from the standard LIBERO benchmark tasks. Instead of evaluating on fixed scenes, each episode samples a unique perturbed configuration — repositioned objects, additional distractors, combined perturbations — giving you open-ended robustness evaluation with statistical power.
 
-robo-eval treats LIBERO-Infinity as a first-class benchmark. No CLI changes were needed to add it — just a new `LiberoInfinityBackend` class in `sims/sim_worker.py` and a `SimConfig` entry in `robo_eval/config.py`. The same `robo-eval run` command works out of the box.
+roboeval treats LIBERO-Infinity as a first-class benchmark. The same
+`roboeval run` command works out of the box.
 
 ---
 
@@ -11,7 +12,7 @@ robo-eval treats LIBERO-Infinity as a first-class benchmark. No CLI changes were
 1. **Install `libero-infinity`** into the LIBERO venv using the setup script:
 
    ```bash
-   bash scripts/setup_envs.sh --only libero_infinity
+   roboeval setup libero_infinity
    ```
 
    This creates a dedicated `.venvs/libero_infinity/` virtualenv (Python 3.11+) and installs `libero-infinity` with all its dependencies (including LIBERO and Scenic 3).
@@ -27,14 +28,14 @@ robo-eval treats LIBERO-Infinity as a first-class benchmark. No CLI changes were
    For development (editable install from a local clone):
 
    ```bash
-   DEV=1 bash scripts/setup_envs.sh --only libero_infinity
+   DEV=1 roboeval setup libero_infinity
    ```
 
    > **Note:** Python 3.11+ is required (Scenic 3 dependency). Set `PYTHON311=/path/to/python3.11` if the interpreter is not on PATH.
    >
-   > If you already have the `libero-infinity` repo cloned with its own `.venv/`, you can point robo-eval at it instead of creating a new venv:
+   > If you already have the `libero-infinity` repo cloned with its own `.venv/`, you can point roboeval at it instead of creating a new venv:
    > ```bash
-   > export ROBO_EVAL_LIBERO_INFINITY_VENV=/path/to/libero-infinity/.venv
+   > export ROBOEVAL_LIBERO_INFINITY_VENV=/path/to/libero-infinity/.venv
    > ```
 
 2. **GPU with EGL** — headless MuJoCo rendering, same as standard LIBERO.
@@ -46,11 +47,17 @@ robo-eval treats LIBERO-Infinity as a first-class benchmark. No CLI changes were
 ## Quick Start
 
 ```bash
-# Evaluate Pi0.5 on all LIBERO-Infinity suites (50 episodes per task)
-robo-eval run --benchmark libero_infinity --vla pi05 --episodes 50 --mode direct
+# 1. Start the Pi0.5 VLA server and the libero_infinity sim worker:
+roboeval serve --vla pi05 --sim libero_infinity --headless
+
+# 2. In another terminal, run evaluation against a YAML config that points at
+#    sim: libero_infinity and a libero_infinity_* suite:
+roboeval run --config configs/libero_infinity_pi05.yaml
 ```
 
-That's it. robo-eval starts the Pi0.5 policy server, launches a sim worker using the `libero-infinity` virtualenv, runs evaluation with Scenic-sampled perturbations, and collects structured JSON results.
+roboeval routes the eval through the Pi0.5 policy server and the
+LIBERO-Infinity sim worker, runs evaluation with Scenic-sampled perturbations,
+and collects structured JSON results.
 
 ---
 
@@ -65,23 +72,26 @@ LIBERO-Infinity mirrors the four standard LIBERO suites, each with 10 tasks:
 | goal | `libero_infinity_goal` | 10 | 300 | Goal-conditioned tasks with perturbed scenes |
 | 10 | `libero_infinity_10` | 10 | 520 | Long-horizon tasks with perturbed configurations |
 
-Run a specific suite:
+Set the suite in your config YAML:
 
-```bash
-robo-eval run --benchmark libero_infinity --vla pi05 --suites spatial --episodes 20
+```yaml
+# configs/libero_infinity_pi05.yaml
+sim: libero_infinity
+suite: libero_infinity_spatial            # one suite
+# or comma-separated for multiple:
+# suite: libero_infinity_spatial,libero_infinity_object,libero_infinity_goal
+episodes_per_task: 20
 ```
 
-Run multiple suites:
-
-```bash
-robo-eval run --benchmark libero_infinity --vla pi05 --suites spatial,object,goal --episodes 10
-```
+Then `roboeval run --config configs/libero_infinity_pi05.yaml`.
 
 ---
 
 ## Perturbation Configuration
 
-LIBERO-Infinity supports several perturbation types controlled via `--sim-args`. The JSON object is forwarded directly to the `LiberoInfinityBackend.init()` method as `sim_config`.
+LIBERO-Infinity supports several perturbation types controlled via the
+`sim_config` mapping in your YAML config. It is forwarded directly to
+`LiberoInfinityBackend.init()`.
 
 ### Perturbation Types
 
@@ -104,32 +114,46 @@ LIBERO-Infinity supports several perturbation types controlled via `--sim-args`.
 
 ### Examples
 
+All examples set keys in your eval YAML, then `roboeval run --config <yaml>`.
+
 **Default perturbation (position only):**
 
-```bash
-robo-eval run --benchmark libero_infinity --vla pi05 --episodes 50
+```yaml
+sim: libero_infinity
+suite: libero_infinity_spatial
+episodes_per_task: 50
+# sim_config omitted → defaults to {"perturbation": "position", "seed": 42}
 ```
 
 **Combined perturbations with distractors:**
 
-```bash
-robo-eval run --benchmark libero_infinity --vla pi05 --episodes 50 \
-  --sim-args '{"perturbation": "combined", "max_distractors": 3}'
+```yaml
+sim: libero_infinity
+suite: libero_infinity_spatial
+episodes_per_task: 50
+sim_config:
+  perturbation: combined
+  max_distractors: 3
 ```
 
 **Reproducible evaluation with a specific seed:**
 
-```bash
-robo-eval run --benchmark libero_infinity --vla pi05 --episodes 50 \
-  --sim-args '{"seed": 12345}'
+```yaml
+sim_config:
+  seed: 12345
 ```
 
 **Limit to 2 suites and 3 tasks for a quick smoke test:**
 
-```bash
-robo-eval run --benchmark libero_infinity --vla smolvla \
-  --suites spatial,object --max-tasks 3 --episodes 2 --mode direct \
-  --sim-args '{"perturbation": "position", "seed": 42}'
+```yaml
+sim: libero_infinity
+suite: libero_infinity_spatial,libero_infinity_object
+max_tasks: 3
+episodes_per_task: 2
+no_vlm: true
+sim_config:
+  perturbation: position
+  seed: 42
 ```
 
 ---
@@ -138,10 +162,12 @@ robo-eval run --benchmark libero_infinity --vla smolvla \
 
 ### Architecture
 
-LIBERO-Infinity plugs into robo-eval's simulator backend system. The `LiberoInfinityBackend` class in `sims/sim_worker.py` is registered via the `libero_infinity` `SimConfig` in `robo_eval/config.py`. The sim worker runs inside the shared LIBERO virtualenv (`.venvs/libero/`), since libero-infinity depends on libero + robosuite.
+LIBERO-Infinity plugs into roboeval's simulator backend system. The
+`LiberoInfinityBackend` class in `sims/sim_worker.py` is registered via the
+`libero_infinity` `SimConfig` in `roboeval/config.py`.
 
 ```
-robo-eval run --benchmark libero_infinity
+roboeval run --config <yaml with sim: libero_infinity>
   │
   ├── VLA policy server (:5100)           # same as any benchmark
   │
@@ -188,12 +214,12 @@ LIBERO-Infinity uses the **same 40 base tasks** (4 suites x 10 tasks) as standar
 
 ## Configuration Reference
 
-### SimConfig (robo_eval/config.py)
+### SimConfig (roboeval/config.py)
 
 ```python
 "libero_infinity": SimConfig(
     name="libero_infinity",
-    venv=os.environ.get("ROBO_EVAL_LIBERO_INFINITY_VENV", ".venvs/libero_infinity"),
+    venv=os.environ.get("ROBOEVAL_LIBERO_INFINITY_VENV", ".venvs/libero_infinity"),
     env_vars={"MUJOCO_GL": "egl"},
 )
 ```
@@ -204,11 +230,11 @@ The sim worker uses a dedicated Python 3.11+ venv (`.venvs/libero_infinity/`) si
 
 | Variable | Default | Description |
 |---|---|---|
-| `ROBO_EVAL_LIBERO_INFINITY_VENV` | `.venvs/libero_infinity` | Path to the LIBERO-Infinity virtualenv (Python 3.11+, separate from the base LIBERO venv) |
-| `LIBERO_INFINITY_ROOT` | *(auto-detected)* | Override: path to a libero-infinity checkout. Auto-resolved via importlib → sibling dir fallback. |
+| `ROBOEVAL_LIBERO_INFINITY_VENV` | `.venvs/libero_infinity` | Path to the LIBERO-Infinity virtualenv (Python 3.11+, separate from the base LIBERO venv) |
+| `LIBERO_INFINITY_ROOT` | *(auto-detected)* | Override: path to a libero-infinity checkout. Auto-resolved via importlib, then an adjacent checkout fallback. |
 | `MUJOCO_GL` | `egl` | Set automatically by the SimConfig; use `egl` for headless GPU rendering |
 
-### Suite Registration (robo_eval/config.py)
+### Suite Registration (roboeval/config.py)
 
 ```python
 BENCHMARK_SUITES = {
@@ -223,15 +249,20 @@ Suite names are qualified automatically: `qualify_suite("libero_infinity", "spat
 
 ## Extending
 
-LIBERO-Infinity demonstrates robo-eval's benchmark extensibility. Adding it required:
+LIBERO-Infinity follows the same benchmark extension points as other simulator
+backends:
 
-1. **A backend class** (`LiberoInfinityBackend` in `sims/sim_worker.py`) — ~450 lines implementing the standard `init/reset/step/close` contract
-2. **A SimConfig entry** in `robo_eval/config.py` — 4 lines pointing to the shared libero venv
-3. **Suite registration** in `BENCHMARK_SUITES` — 1 line listing the suite names
-4. **A setup function** in `scripts/setup_envs.sh` — `pip install` into the libero venv
+1. **Backend class** implementing the standard `init/reset/step/close` contract
+2. **SimConfig entry** in `roboeval/config.py`
+3. **Suite registration** in `BENCHMARK_SUITES`
+4. **Setup target** exposed through `roboeval setup`
 
-**Zero CLI changes.** The `robo-eval run --benchmark libero_infinity` command worked immediately because the CLI dispatches based on the benchmark name in the config registry.
+Pointing `sim: libero_infinity` in any eval YAML is enough for the orchestrator
+to dispatch through the config registry.
 
-**Install path:** `libero-infinity` is distributed as a pip package from GitHub, installed into its own Python 3.11+ venv (`.venvs/libero_infinity/`). The `setup_envs.sh --only libero_infinity` target handles venv creation and installation automatically.
+**Install path:** `libero-infinity` is distributed as a pip package from GitHub,
+installed into its own Python 3.11+ venv (`.venvs/libero_infinity/`). The
+`roboeval setup libero_infinity` target handles venv creation and
+installation automatically.
 
-For details on adding your own benchmark, see [`docs/adding_a_benchmark.md`](adding_a_benchmark.md).
+For details on adding your own benchmark, see [`docs/extending.md`](extending.md#add-a-benchmark).

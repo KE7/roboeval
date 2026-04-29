@@ -1,10 +1,7 @@
-# robo-eval smoke config: VQ-BeT × gym-pusht (PushT task)
-# Usage: robo-eval run --config configs/gym_pusht_vqbet_smoke.yaml
-# Requires:
-#   VLA server : .venvs/vqbet/bin/python \
-#                  -m sims.vla_policies.vqbet_policy --port 5108
-#   Sim worker : .venvs/gym_pusht/bin/python sims/sim_worker.py \
-#                  --sim gym_pusht --port 5305 --headless
+# roboeval smoke config: VQ-BeT × gym-pusht (PushT task)
+# Usage:
+#   roboeval serve --vla vqbet --sim gym_pusht --headless &
+#   roboeval run -c configs/gym_pusht_vqbet_smoke.yaml
 #
 # gym-pusht is the canonical companion simulator for VQ-BeT. The original
 # BeT paper used PushT as its primary evaluation, the same benchmark
@@ -41,5 +38,5 @@ eval_python: ""
 # Output
 output_dir: results/gym_pusht_vqbet_smoke
 
-# Extra params passed to run_sim_eval.py (key -> value)
+# Extra params passed to roboeval.run_sim_eval (key -> value)
 params: {}

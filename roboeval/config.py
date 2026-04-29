@@ -7,7 +7,6 @@ import os
 import socket
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
 
 _log = logging.getLogger(__name__)
 
@@ -20,10 +19,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Default: ~/.local/share/roboeval/vendors/
 # Override via ROBOEVAL_VENDORS_DIR environment variable.
 # .resolve() ensures an absolute path even if the env var is relative.
-VENDORS_DIR = Path(os.environ.get(
-    "ROBOEVAL_VENDORS_DIR",
-    str(Path.home() / ".local" / "share" / "roboeval" / "vendors"),
-)).resolve()
+VENDORS_DIR = Path(
+    os.environ.get(
+        "ROBOEVAL_VENDORS_DIR",
+        str(Path.home() / ".local" / "share" / "roboeval" / "vendors"),
+    )
+).resolve()
 
 
 def _resolve_libero_infinity_root() -> str | None:
@@ -86,14 +87,9 @@ def validate_port(port: int, name: str = "port") -> int:
     if not isinstance(port, int):
         raise ValueError(f"{name} must be an integer, got {type(port).__name__}")
     if port < 1 or port > 65535:
-        raise ValueError(
-            f"{name} must be between 1 and 65535, got {port}"
-        )
+        raise ValueError(f"{name} must be between 1 and 65535, got {port}")
     if port < 1024:
-        raise ValueError(
-            f"{name}={port} is a privileged port (< 1024). "
-            f"Use a port >= 1024."
-        )
+        raise ValueError(f"{name}={port} is a privileged port (< 1024). Use a port >= 1024.")
     return port
 
 
@@ -112,7 +108,7 @@ def is_port_available(port: int) -> bool:
 
 
 def find_available_port(
-    preferred_port: Optional[int] = None,
+    preferred_port: int | None = None,
     *,
     search_start: int = 1024,
     search_end: int = 65535,
@@ -128,14 +124,12 @@ def find_available_port(
         if is_port_available(port):
             return port
 
-    raise RuntimeError(
-        f"No available TCP port found in range {search_start}-{search_end}"
-    )
+    raise RuntimeError(f"No available TCP port found in range {search_start}-{search_end}")
 
 
 def find_available_port_block(
     count: int,
-    preferred_start: Optional[int] = None,
+    preferred_start: int | None = None,
     *,
     search_start: int = 1024,
     search_end: int = 65535,
@@ -158,8 +152,7 @@ def find_available_port_block(
             return base_port
 
     raise RuntimeError(
-        f"No available block of {count} TCP ports found in range "
-        f"{search_start}-{search_end}"
+        f"No available block of {count} TCP ports found in range {search_start}-{search_end}"
     )
 
 
@@ -184,9 +177,10 @@ class VLAConfig:
     def venv_python(self) -> Path:
         return PROJECT_ROOT / self.venv / "bin" / "python"
 
+
 # To add a new VLA: add a VLAConfig entry below, create a policy server in
 # sims/vla_policies/. See docs/extending.md.
-VLA_CONFIGS: Dict[str, VLAConfig] = {
+VLA_CONFIGS: dict[str, VLAConfig] = {
     "pi05": VLAConfig(
         name="pi05",
         port=5100,
@@ -254,7 +248,7 @@ VLA_CONFIGS: Dict[str, VLAConfig] = {
 # HuggingFace model_id and the unnorm_key used by predict_action().
 #
 # Reference: https://huggingface.co/openvla
-OPENVLA_SUITE_MODELS: Dict[str, Dict[str, str]] = {
+OPENVLA_SUITE_MODELS: dict[str, dict[str, str]] = {
     "libero_spatial": {
         "model_id": "openvla/openvla-7b-finetuned-libero-spatial",
         "unnorm_key": "libero_spatial",
@@ -274,7 +268,7 @@ OPENVLA_SUITE_MODELS: Dict[str, Dict[str, str]] = {
 }
 
 
-def get_openvla_model_for_suite(suite: str) -> Optional[Dict[str, str]]:
+def get_openvla_model_for_suite(suite: str) -> dict[str, str] | None:
     """Return the OpenVLA model_id and unnorm_key for a given suite.
 
     Returns None if no suite-specific override exists (the default model
@@ -307,7 +301,7 @@ P2_SUITES = [
 # ---------------------------------------------------------------------------
 # Maps benchmark name -> list of short (unqualified) suite names.
 # Use qualify_suite() to obtain the fully-qualified suite name.
-BENCHMARK_SUITES: Dict[str, List[str]] = {
+BENCHMARK_SUITES: dict[str, list[str]] = {
     "libero": ["spatial", "object", "goal", "10"],
     "libero_pro": ["spatial_object", "goal_swap", "spatial_with_mug"],
     "libero_infinity": ["spatial", "object", "goal", "10"],
@@ -326,7 +320,7 @@ def qualify_suite(benchmark: str, short_suite: str) -> str:
     return f"{benchmark}_{short_suite}"
 
 
-def get_suites_for_benchmark(benchmark: str) -> List[str]:
+def get_suites_for_benchmark(benchmark: str) -> list[str]:
     """Return the list of short suite names for a given benchmark.
 
     Raises:
@@ -340,7 +334,7 @@ def get_suites_for_benchmark(benchmark: str) -> List[str]:
     return BENCHMARK_SUITES[benchmark]
 
 
-def get_qualified_suites(benchmark: str) -> List[str]:
+def get_qualified_suites(benchmark: str) -> list[str]:
     """Return fully-qualified suite names for a benchmark.
 
     Equivalent to [qualify_suite(benchmark, s) for s in get_suites_for_benchmark(benchmark)].
@@ -368,14 +362,14 @@ LIBERO_PRO_SUITES = get_qualified_suites("libero_pro")
 LIBERO_INFINITY_SUITES = get_qualified_suites("libero_infinity")
 
 # Reverse map: qualified suite name -> benchmark name (used for sim routing)
-_SUITE_TO_BENCHMARK: Dict[str, str] = {
+_SUITE_TO_BENCHMARK: dict[str, str] = {
     qualify_suite(benchmark, short): benchmark
     for benchmark, shorts in BENCHMARK_SUITES.items()
     for short in shorts
 }
 
 
-def get_benchmark_for_suite(qualified_suite: str) -> Optional[str]:
+def get_benchmark_for_suite(qualified_suite: str) -> str | None:
     """Return the benchmark name for a fully-qualified suite name, or None.
 
     Examples::
@@ -389,7 +383,7 @@ def get_benchmark_for_suite(qualified_suite: str) -> Optional[str]:
 
 # Suite presets: name -> list of fully-qualified suite names.
 # All entries are now derived from BENCHMARK_SUITES via qualify_suite.
-SUITE_PRESETS: Dict[str, List[str]] = {
+SUITE_PRESETS: dict[str, list[str]] = {
     "all": (
         get_qualified_suites("libero")
         + get_qualified_suites("libero_pro")
@@ -420,7 +414,7 @@ TASKS_PER_SUITE = 10
 # sim venv (Python 3.8 cannot import roboeval). Keep both in sync.
 # Max rollout steps per suite. Also duplicated in sims/env_wrapper.py — keep both in sync.
 # To add a new suite: add an entry here AND in sims/env_wrapper.py:SUITE_MAX_STEPS.
-SUITE_MAX_STEPS: Dict[str, int] = {
+SUITE_MAX_STEPS: dict[str, int] = {
     # Standard LIBERO suites (from lerobot TASK_SUITE_MAX_STEPS)
     "libero_spatial": 280,
     "libero_object": 280,
@@ -462,7 +456,7 @@ def get_suite_max_steps(suite: str) -> int:
     return SUITE_MAX_STEPS.get(suite, DEFAULT_MAX_STEPS)
 
 
-def resolve_suites(suite_spec: str) -> List[str]:
+def resolve_suites(suite_spec: str) -> list[str]:
     """Resolve a comma-separated suite spec into a list of suite names.
 
     Supports preset names (all, libero, libero_pro, p1, p2, p1p2)

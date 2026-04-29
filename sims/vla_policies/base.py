@@ -37,7 +37,7 @@ from fastapi.responses import JSONResponse
 from sims.vla_policies.vla_schema import PredictRequest, VLAObservation
 
 try:
-    from robo_eval.specs import ActionObsSpec
+    from roboeval.specs import ActionObsSpec
 except ImportError:
     ActionObsSpec = None  # type: ignore[assignment,misc]
 

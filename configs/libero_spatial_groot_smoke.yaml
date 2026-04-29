@@ -1,14 +1,9 @@
-# robo-eval smoke config: GR00T-N1.6 × libero_spatial (1 episode, 1 task)
+# roboeval smoke config: GR00T-N1.6 × libero_spatial (1 episode, 1 task)
 #
-# Usage: robo-eval run --config configs/libero_spatial_groot_smoke.yaml
-#
-# Requires:
-#   VLA server : GROOT_MODEL_ID=0xAnkitSingh/GR00T-N1.6-LIBERO \
-#                GROOT_EMBODIMENT_TAG=LIBERO_PANDA \
-#                  .venvs/groot/bin/python -m sims.vla_policies.groot_policy --port 5108
-#   Sim worker : MUJOCO_GL=egl .venvs/libero/bin/python -m sims.sim_worker \
-#                  --sim libero --port 5300 --headless
-#
+# Usage:
+#   GROOT_MODEL_ID=0xAnkitSingh/GR00T-N1.6-LIBERO GROOT_EMBODIMENT_TAG=LIBERO_PANDA roboeval serve --vla groot --sim libero --headless &
+#   roboeval run -c configs/libero_spatial_groot_smoke.yaml
+
 # Uses the community LIBERO fine-tune of GR00T-N1.6
 # (`0xAnkitSingh/GR00T-N1.6-LIBERO`, reportedly 94.9% LIBERO avg) under the
 # upstream Isaac-GR00T N1.6 codebase pinned at commit e29d8fc.

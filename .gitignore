@@ -1,5 +1,5 @@
 # ============================================
-# robo-eval .gitignore
+# roboeval .gitignore
 # ============================================
 
 # --- Python ---
@@ -38,16 +38,14 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 
-# --- Legacy shell scripts in repo root ---
+# --- Shell scripts in repo root ---
 /*.sh
 
-# --- Legacy scripts ---
+# --- Archived scripts ---
 scripts/legacy/
 scripts/README.md
 
-# --- Internal / development docs ---
-# Keep only: adding_a_vla.md, adding_a_benchmark.md,
-#             benchmark_results.md, vla_policy_architecture.md
+# --- Project docs excluded from release ---
 docs/competitive_analysis.md
 docs/review_*
 docs/audit_*
@@ -61,7 +59,7 @@ docs/isaac_*
 docs/ik_*
 docs/blog_post.md
 docs/omar_blog_post.md
-docs/robo_eval.md
+docs/roboeval.md
 docs/ARCHITECTURE.md
 docs/EXTENDING.md
 docs/fm_proxy_verification.md
@@ -73,7 +71,7 @@ docs/benchmark_audit_report.md
 docs/libero_pro_audit_report.md
 
 # --- Results / experiment data ---
-results/
+/results/
 outputs/
 libero_spatial*/
 sim_experience/
@@ -83,10 +81,12 @@ liten_examples/
 planner_context/
 
 # --- Log files ---
+logs/
+scratch/
 *.log
 MUJOCO_LOG.TXT
 
-# --- Config files (internal) ---
+# --- Local config files ---
 litellm_*.yaml
 
 # --- Notification scripts ---
@@ -97,7 +97,7 @@ echo
 EXIT:*
 Exit:*
 
-# --- Internal architecture docs ---
+# --- Architecture notes ---
 sims/vla_policies/ARCHITECTURE.md
 
 # --- Lock files ---
@@ -108,7 +108,7 @@ uv.lock
 # --- Binary artifacts ---
 *.whl
 
-# --- Internal reports / dev artifacts ---
+# --- Reports / development artifacts ---
 GRIPPER_*.md
 GRIPPER_*.txt
 GROOT_*.md
@@ -122,10 +122,10 @@ MUJOCO_LOG.TXT
 # --- Vendored external repos ---
 InternVLA-A1/
 
-# --- Internal design docs ---
+# --- Design notes ---
 docs/docker_migration_plan.md
 docs/action_space_plan.md
-docs/liten_vla_eval_adapter_design.md
+docs/liten_adapter_design.md
 docs/lerobot_known_issues.md
 
 # --- Other ---
@@ -138,5 +138,7 @@ bridge_data/
 generated_programs/
 manual_evaldata/
 finetune_data/
-robo-eval
 *.egg-info/
+
+# --- Local planning artifacts ---
+.dev-tooling/

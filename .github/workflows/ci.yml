@@ -1,3 +1,12 @@
+# =============================================================================
+# roboeval CI — GitHub Actions
+#
+# Jobs:
+#   1. Lint      — ruff check + ruff format --check (every PR + push to main)
+#   2. Tests     — pytest tests/ (every PR + push to main)
+#   3. Install   — fresh-clone setup.sh libero smoke (every PR + push to main)
+# =============================================================================
+
 name: CI
 
 on:
@@ -6,18 +15,115 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-progress runs for the same ref (saves compute on rapid pushes)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 1: Lint  (ruff check + ruff format --check)
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  test:
+  lint:
+    name: "Lint (Python ${{ matrix.python-version }})"
     runs-on: ubuntu-latest
+    # === START py_version_matrix ===
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    # === END py_version_matrix ===
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
-      - name: Install dependencies
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 2: Unit tests  (pytest tests/)
+# ─────────────────────────────────────────────────────────────────────────────
+  test:
+    name: "Unit tests (Python ${{ matrix.python-version }})"
+    runs-on: ubuntu-latest
+    # === START py_version_matrix ===
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    # === END py_version_matrix ===
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package + dev deps
         run: pip install -e .[dev]
 
       - name: Run tests
-        run: pytest tests/ -v
+        # -x: stop on first failure; --tb=short: compact tracebacks
+        run: pytest tests/ -v -x --tb=short
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 3b: Fresh-clone install smoke (libero sim_worker boot + /init)
+#
+# Catches setup.sh regressions that pytest doesn't hit. Runs on every PR.
+# ─────────────────────────────────────────────────────────────────────────────
+  fresh-install-smoke:
+    name: "Fresh-clone install smoke (libero sim boot)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install MuJoCo rendering deps (osmesa + EGL stub for headless CI)
+        run: |
+          sudo apt-get update -qq
+          # libosmesa6-dev: software-only mesa renderer used by MUJOCO_GL=osmesa
+          # libegl1-mesa-dev: provides libEGL.so so mujoco.egl can import without a GPU
+          sudo apt-get install -y libosmesa6-dev libegl1-mesa-dev patchelf
+
+      - name: Run setup.sh libero
+        env:
+          SKIP_SYSTEM_DEPS: "1"
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          ./scripts/setup.sh libero
+
+      - name: Boot sim_worker + curl /init
+        run: |
+          # Seed the LIBERO config file so the first import doesn't prompt stdin.
+          # ~/.libero/config.yaml is created on first import if absent; answer "N"
+          # to keep default paths (no custom dataset directory needed for smoke).
+          echo "N" | MUJOCO_GL=osmesa .venvs/libero/bin/python -c \
+            "from libero.libero import benchmark" 2>/dev/null || true
+
+          MUJOCO_GL=osmesa .venvs/libero/bin/python sims/sim_worker.py --sim libero --port 5300 --headless &
+          SIM_PID=$!
+          sleep 12
+          # /info before /init should 503 cleanly (typed error, not crash)
+          INFO=$(curl -s --max-time 5 http://localhost:5300/info || true)
+          echo "info: $INFO"
+          # /init must succeed end-to-end (validates torch + LIBERO + robosuite import chain)
+          INIT=$(curl -s --max-time 60 -X POST http://localhost:5300/init \
+              -H "Content-Type: application/json" \
+              -d '{"sim":"libero","task":"","camera_resolution":256,"suite":"libero_object"}')
+          echo "init: $INIT"
+          kill -9 $SIM_PID 2>/dev/null || true
+          echo "$INIT" | grep -q '"success": *true' || (echo "FAIL: /init did not return success:true"; exit 1)
+

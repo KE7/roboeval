@@ -18,8 +18,8 @@ Quick-start (3 steps for a working server):
 
     1. Rename ``MyModelPolicy`` to something meaningful.
     2. Fill in ``load_model()``, ``predict()``, and ``get_info()`` (TODO markers below).
-    3. Launch:
-           python -m sims.vla_policies.my_model_policy --model-id my-org/my-model
+    3. Register the policy, then launch:
+           roboeval serve --vla my_model --model-id my-org/my-model
 
 The server exposes four HTTP endpoints automatically via ``make_app()``:
 
@@ -41,7 +41,7 @@ import logging
 # before running evaluations with mismatched conventions.
 # Pre-built constants cover the most common formats; compose custom ActionObsSpecs
 # for anything else.  Import only what you need.
-from robo_eval.specs import (
+from roboeval.specs import (
     ActionObsSpec,
 )
 

@@ -16,7 +16,7 @@
 #
 # Requirements:
 #   - Run from the repo root  (cd roboeval && bash examples/demo_recording.sh)
-#   - uv installed, or setup.sh will install it
+#   - uv installed, or roboeval setup will install it
 #   - NVIDIA GPU with CUDA (for pi05 model)
 #
 # =============================================================================
@@ -123,7 +123,7 @@ pause() {
 # Sanity checks (not run in simulate mode)
 # ---------------------------------------------------------------------------
 if [[ "$SIMULATE" -eq 0 ]]; then
-  if [[ ! -f "pyproject.toml" ]] || ! grep -q 'roboeval\|robo.eval\|robo_eval' pyproject.toml 2>/dev/null; then
+  if [[ ! -f "pyproject.toml" ]] || ! grep -q 'roboeval\|robo.eval\|roboeval' pyproject.toml 2>/dev/null; then
     echo "${C_RED}Error: run this script from the roboeval repo root.${C_RESET}" >&2
     exit 1
   fi
@@ -156,12 +156,12 @@ narrate "We're already inside the repo, so we continue from here."
 pause 2
 
 # =============================================================================
-# STEP 2  —  setup.sh
+# STEP 2  —  roboeval setup
 # =============================================================================
 FAILED_STEP="setup"
 
 banner "STEP 2 / 6  —  Install: Pi 0.5 policy server + LIBERO simulator"
-narrate "setup.sh pi05 libero will:"
+narrate "roboeval setup pi05 libero will:"
 narrate "  • Install uv (if missing)"
 narrate "  • Create .venvs/pi05  (Python 3.11, ~75s model download on first run)"
 narrate "  • Create .venvs/libero (Python 3.8, clones LIBERO repo, patches missing __init__.py)"
@@ -173,26 +173,26 @@ if [[ "$QUICK" -eq 1 ]]; then
   narrate "[--quick] Skipping setup — reusing existing .venvs."
   pause 1
 else
-  run_cmd "./scripts/setup.sh pi05 libero"
+  run_cmd "roboeval setup pi05 libero"
 fi
 pause 2
 
 # =============================================================================
-# STEP 3  —  robo-eval test
+# STEP 3  —  roboeval test
 # =============================================================================
-FAILED_STEP="robo-eval test"
+FAILED_STEP="roboeval test"
 
-banner "STEP 3 / 6  —  Validate the install  (robo-eval test)"
-narrate "robo-eval test starts the VLA server and sim worker, calls /health on each,"
+banner "STEP 3 / 6  —  Validate the install  (roboeval test)"
+narrate "roboeval test starts the VLA server and sim worker, calls /health on each,"
 narrate "runs a 1-step dry-run, and verifies the ActionObsSpec contracts match."
 echo ""
-run_cmd ".venvs/roboeval/bin/robo-eval test"
+run_cmd ".venvs/roboeval/bin/roboeval test"
 pause 2
 
 # =============================================================================
-# STEP 4  —  robo-eval run (1-episode smoke)
+# STEP 4  —  roboeval run (1-episode smoke)
 # =============================================================================
-FAILED_STEP="robo-eval run"
+FAILED_STEP="roboeval run"
 
 banner "STEP 4 / 6  —  First eval  (pi05 × libero_spatial, 1 episode)"
 narrate "Running the CI smoke config: 1 task × 10 episodes."
@@ -200,7 +200,7 @@ narrate "The Pi 0.5 server and LIBERO worker start as subprocesses automatically
 narrate "Expected: ≥1/10 success  (historical baseline ~93%)."
 narrate "Expected runtime: ~8 min (10 eps × ~50 s/ep on GB10)."
 echo ""
-run_cmd ".venvs/roboeval/bin/robo-eval run --config configs/ci/pi05_libero_spatial_smoke.yaml"
+run_cmd ".venvs/roboeval/bin/roboeval run --config configs/ci/pi05_libero_spatial_smoke.yaml"
 pause 2
 
 # =============================================================================
@@ -255,10 +255,10 @@ echo "  ${C_GREEN}★ Quick start guide${C_RESET}"
 echo "    ${C_CYAN}https://github.com/KE7/roboeval/blob/main/docs/quickstart.md${C_RESET}"
 echo ""
 echo "  ${C_GREEN}★ Full benchmark results${C_RESET}"
-echo "    ${C_CYAN}https://github.com/KE7/roboeval/blob/main/docs/results.md${C_RESET}"
+echo "    ${C_CYAN}https://github.com/KE7/roboeval/blob/main/docs/validation.md${C_RESET}"
 echo ""
 echo "  ${C_GREEN}★ Head-to-head model comparisons${C_RESET}"
-echo "    ${C_CYAN}https://github.com/KE7/roboeval/blob/main/docs/comparison.md${C_RESET}"
+echo "    ${C_CYAN}https://github.com/KE7/roboeval/blob/main/README.md${C_RESET}"
 echo ""
 echo "  ${C_GREEN}★ Add your own VLA or simulator${C_RESET}"
 echo "    ${C_CYAN}https://github.com/KE7/roboeval/blob/main/docs/extending.md${C_RESET}"

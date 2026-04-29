@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# run_sharded_v2.sh — convenience launcher for sharded robo-eval runs.
+# run_sharded_v2.sh — convenience launcher for sharded roboeval runs.
 #
 # Usage:
 #   bash scripts/run_sharded_v2.sh --config <yaml> --num-shards <N> [--output-dir <dir>]
 #
 # This script:
-#   1. Backgrounds N shard processes (robo-eval run --shard-id i --num-shards N).
+#   1. Backgrounds N shard processes (roboeval run --shard-id i --num-shards N).
 #   2. Waits for all shards to finish.
-#   3. Calls robo-eval merge to combine shard results into final.json.
+#   3. Calls roboeval merge to combine shard results into final.json.
 #
 # Example:
 #   bash scripts/run_sharded_v2.sh \
@@ -16,8 +16,8 @@
 #       --output-dir results/run_20260424
 #
 # Requirements:
-#   - robo-eval CLI installed (pip install -e .) or invoked as python -m robo_eval.cli.main
-#   - VLA server and sim_worker already running (use: robo-eval serve --vla pi05 --sim libero)
+#   - roboeval CLI installed (pip install -e .) or invoked as python -m roboeval.cli.main
+#   - VLA server and sim_worker already running (use: roboeval serve --vla pi05 --sim libero)
 
 set -euo pipefail
 
@@ -45,13 +45,13 @@ if [[ -z "$CONFIG" ]]; then
     exit 1
 fi
 
-# ---- resolve robo-eval command ----
-if command -v robo-eval &>/dev/null; then
-    ROBO_EVAL="robo-eval"
-elif python -m robo_eval.cli.main --help &>/dev/null 2>&1; then
-    ROBO_EVAL="python -m robo_eval.cli.main"
+# ---- resolve roboeval command ----
+if command -v roboeval &>/dev/null; then
+    ROBOEVAL="roboeval"
+elif python -m roboeval.cli.main --help &>/dev/null 2>&1; then
+    ROBOEVAL="python -m roboeval.cli.main"
 else
-    echo "Error: robo-eval not found. Install with: pip install -e ."
+    echo "Error: roboeval not found. Install with: pip install -e ."
     exit 1
 fi
 
@@ -65,7 +65,7 @@ fi
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
 
 echo "================================================================"
-echo "robo-eval sharded run"
+echo "roboeval sharded run"
 echo "  config:     $CONFIG"
 echo "  shards:     $NUM_SHARDS"
 echo "  output_dir: $OUTPUT_DIR"
@@ -77,7 +77,7 @@ PIDS=()
 for ((i=0; i<NUM_SHARDS; i++)); do
     LOG_FILE="$LOG_DIR/shard_${i}of${NUM_SHARDS}.log"
     echo "Starting shard $i/$NUM_SHARDS → $LOG_FILE"
-    $ROBO_EVAL run \
+    $ROBOEVAL run \
         --config "$CONFIG" \
         --shard-id "$i" \
         --num-shards "$NUM_SHARDS" \
@@ -110,7 +110,7 @@ SHARD_PATTERN="${OUTPUT_DIR}/*shard*.json"
 
 echo ""
 echo "Merging shards: $SHARD_PATTERN → $MERGE_OUTPUT"
-$ROBO_EVAL merge \
+$ROBOEVAL merge \
     --pattern "$SHARD_PATTERN" \
     --output "$MERGE_OUTPUT" \
     || true  # Don't fail the script if merge is partial

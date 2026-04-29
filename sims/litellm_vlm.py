@@ -8,8 +8,6 @@ import logging
 
 import requests
 
-import vlm_hl.vlm_methods as vlmi
-
 # Default port for the litellm proxy server
 _DEFAULT_PORT = 4000
 _REACHABILITY_TIMEOUT = 3.0
@@ -49,6 +47,8 @@ def setup_litellm_client(
         api_key: API key for the proxy (default: "not-needed" for local proxies).
         model_override: If set, overrides the VLM model name for all calls.
     """
+    import vlm_hl.vlm_methods as vlmi  # noqa: PLC0415
+
     _assert_litellm_reachable(host, port)
     api_base = f"http://{host}:{port}/v1"
     vlmi.setup_litellm(api_base=api_base, api_key=api_key, model_override=model_override)

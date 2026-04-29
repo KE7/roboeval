@@ -1,10 +1,7 @@
-# robo-eval smoke config: Diffusion Policy × gym-pusht (PushT task)
-# Usage: robo-eval run --config configs/gym_pusht_diffusion_policy_smoke.yaml
-# Requires:
-#   VLA server : .venvs/diffusion_policy/bin/python \
-#                  -m sims.vla_policies.diffusion_policy_policy --port 5103
-#   Sim worker : .venvs/gym_pusht/bin/python sims/sim_worker.py \
-#                  --sim gym_pusht --port 5305 --headless
+# roboeval smoke config: Diffusion Policy × gym-pusht (PushT task)
+# Usage:
+#   roboeval serve --vla diffusion_policy --sim gym_pusht --headless &
+#   roboeval run -c configs/gym_pusht_diffusion_policy_smoke.yaml
 #
 # gym-pusht is the canonical companion simulator for Diffusion Policy.
 # The original DP paper (Chi et al., 2023) was trained and evaluated on PushT.
@@ -42,5 +39,5 @@ eval_python: ""
 # Output
 output_dir: results/gym_pusht_dp_smoke
 
-# Extra params passed to run_sim_eval.py (key -> value)
+# Extra params passed to roboeval.run_sim_eval (key -> value)
 params: {}

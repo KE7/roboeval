@@ -1,11 +1,11 @@
-"""Tests for robo_eval.rotation — rotation conversion utilities."""
+"""Tests for roboeval.rotation — rotation conversion utilities."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from robo_eval.rotation import (
+from roboeval.rotation import (
     axisangle_to_matrix,
     axisangle_to_rot6d_contiguous,
     axisangle_to_rot6d_interleaved,

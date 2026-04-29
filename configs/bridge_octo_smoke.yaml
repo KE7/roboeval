@@ -1,4 +1,4 @@
-# robo-eval smoke config: octo-small-1.5 x libero_spatial (infra validation only)
+# roboeval smoke config: octo-small-1.5 x libero_spatial (infra validation only)
 #
 # aarch64-blocked: Octo requires x86_64 — its dep dlimp==0.0.1 transitively
 #   pins tensorflow==2.15.0 which on aarch64 resolves to tensorflow_cpu_aws (an
@@ -16,14 +16,8 @@
 #   compatible simulator backend is added.
 #
 # Usage:
-#   VLA server: OCTO_MODEL_ID=rail-berkeley/octo-small-1.5 \
-#               .venvs/octo/bin/python -m sims.vla_policies.octo_policy --port 5106
-#   Sim worker: MUJOCO_GL=egl \
-#               .venvs/libero/bin/python -m sims.sim_worker --sim libero --port 5300 --headless
-#   Run:        robo-eval run --config configs/bridge_octo_smoke.yaml
-#
-# Prerequisite: octo package installed in .venvs/octo
-#   .venvs/octo/bin/pip install git+https://github.com/octo-models/octo
+#   OCTO_MODEL_ID=rail-berkeley/octo-small-1.5 roboeval serve --vla octo --sim libero --headless &
+#   roboeval run -c configs/bridge_octo_smoke.yaml
 
 name: bridge_octo_smoke
 

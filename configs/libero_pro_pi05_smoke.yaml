@@ -1,12 +1,9 @@
-# robo-eval smoke config: Pi 0.5 × LIBERO-Pro (10 episodes, 1 task, direct / no VLM)
+# roboeval smoke config: Pi 0.5 × LIBERO-Pro (10 episodes, 1 task, direct / no VLM)
 #
-# Usage: robo-eval run --config configs/libero_pro_pi05_smoke.yaml
-#
-# Requires:
-#   VLA server : .venvs/pi05/bin/python -m sims.vla_policies.pi05_policy --port 5100
-#   Sim worker : MUJOCO_GL=egl .venvs/libero_pro/bin/python sims/sim_worker.py \
-#                  --sim libero_pro --port 5300 --headless
-#
+# Usage:
+#   roboeval serve --vla pi05 --sim libero_pro --headless &
+#   roboeval run -c configs/libero_pro_pi05_smoke.yaml
+
 # Smoke validation: 10 episodes on 1 task; gate is ≥1/10 successes.
 # For the hierarchical VLM planner variant see:
 #   configs/libero_pro_pi05_liten_smoke.yaml
@@ -38,5 +35,5 @@ eval_python: ""
 # Output
 output_dir: results/libero_pro_pi05_smoke
 
-# Extra params passed to run_sim_eval.py (key -> value)
+# Extra params passed to roboeval.run_sim_eval (key -> value)
 params: {}

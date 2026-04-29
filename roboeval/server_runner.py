@@ -166,6 +166,7 @@ def _assert_port_free(host: str, port: int) -> None:
     A 1-line preflight beats a 120 s health-poll mystery.
     """
     import socket
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -216,7 +217,9 @@ def _resolve_python(venv_path: str | None, project_root: Path, must_exist: bool 
         if must_exist:
             raise FileNotFoundError(msg)
         logger.warning(msg)
-        logger.warning("Falling back to sys.executable — most VLAs will fail with ModuleNotFoundError.")
+        logger.warning(
+            "Falling back to sys.executable — most VLAs will fail with ModuleNotFoundError."
+        )
     return sys.executable
 
 
@@ -239,7 +242,11 @@ def _poll_health(url: str, timeout: float = 60.0, interval: float = 2.0) -> tupl
     while time.time() < deadline:
         try:
             resp = requests.get(url + "/health", timeout=5.0)
-            data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            data = (
+                resp.json()
+                if resp.headers.get("content-type", "").startswith("application/json")
+                else {}
+            )
             err = data.get("error")
             if err:
                 last_error = str(err)
@@ -348,10 +355,7 @@ def start_vla(
         If the server does not become healthy within health_timeout.
     """
     if vla_name not in _VLA_MODULE_MAP:
-        raise ValueError(
-            f"Unknown VLA: {vla_name!r}. "
-            f"Known VLAs: {sorted(_VLA_MODULE_MAP.keys())}"
-        )
+        raise ValueError(f"Unknown VLA: {vla_name!r}. Known VLAs: {sorted(_VLA_MODULE_MAP.keys())}")
 
     port = port or _VLA_DEFAULT_PORTS.get(vla_name, 5100)
     _assert_port_free("0.0.0.0", port)
@@ -431,10 +435,7 @@ def start_sim(
         If the server does not become healthy within health_timeout.
     """
     if backend not in _KNOWN_SIMS:
-        raise ValueError(
-            f"Unknown sim backend: {backend!r}. "
-            f"Known sims: {sorted(_KNOWN_SIMS)}"
-        )
+        raise ValueError(f"Unknown sim backend: {backend!r}. Known sims: {sorted(_KNOWN_SIMS)}")
 
     port = port or _SIM_DEFAULT_PORTS.get(backend, 5300)
     _assert_port_free("0.0.0.0", port)
@@ -448,10 +449,14 @@ def start_sim(
     logs_dir = Path(logs_dir)
 
     cmd = [
-        python, "-m", "sims.sim_worker",
+        python,
+        "-m",
+        "sims.sim_worker",
         # sim_worker.py argparse expects --sim.
-        "--sim", backend,
-        "--port", str(port),
+        "--sim",
+        backend,
+        "--port",
+        str(port),
     ]
     if headless:
         cmd.append("--headless")

@@ -1,16 +1,16 @@
-# CI smoke config: tdmpc2 × metaworld button-press-v2
+# CI smoke config: tdmpc2 x metaworld button-press-v2
 #
-# Gate: ≥1/1 episodes runs end-to-end (smoke, not benchmark).
+# Gate: >=1/1 episodes runs end-to-end (smoke, not benchmark).
 # Mode: no-vlm (TDMPC2 is task-conditioned via task ID, ignores language).
 # Expected runtime: hardware-dependent; roughly one 500-step episode.
 #
-# Coverage: first 4-dim-native VLA paired with metaworld — the spec
+# Coverage: first 4-dim-native VLA paired with metaworld - the spec
 # gate accepts the pairing exactly, so this smoke run validates metaworld
 # end-to-end (instead of the spec-gate-only smoke run we ship for SmolVLA).
 #
-# Requires (started by CI before robo-eval run):
-#   VLA server : python -m sims.vla_policies.tdmpc2_policy --port 5109
-#   Sim worker : python -m sims.sim_worker --sim metaworld --port 5305 --headless
+# Usage:
+#   roboeval serve --vla tdmpc2 --sim metaworld --headless &
+#   roboeval run -c configs/ci/metaworld_tdmpc2_smoke.yaml
 
 name: ci_metaworld_tdmpc2_smoke
 

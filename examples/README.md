@@ -9,7 +9,7 @@ configuration files.
 |------|---------|
 | [`new_vla_template.py`](new_vla_template.py) | Minimal but complete template for a new VLA policy server. Copy, fill in 4 marked spots, have a working HTTP server. |
 | [`new_sim_template.py`](new_sim_template.py) | Template for a new simulator backend. Copy, implement 6 required methods, register in `BACKENDS`. |
-| [`eval.yaml`](eval.yaml) | Example evaluation config for `robo-eval run`. |
+| [`eval.yaml`](eval.yaml) | Example evaluation config for `roboeval run`. |
 
 ## Quick start
 

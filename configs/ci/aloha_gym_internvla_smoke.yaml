@@ -1,18 +1,17 @@
-# CI smoke config: InternVLA × gym-aloha (TransferCube)
+# CI smoke config: InternVLA x gym-aloha (TransferCube)
 #
-# Gate: ≥1/10 episodes succeed (smoke, not benchmark).
+# Gate: >=1/10 episodes succeed (smoke, not benchmark).
 # Baseline: pending v0.1 smoke result.
 # Mode: no-vlm (direct instruction, absolute joint actions).
 # Expected runtime: hardware-dependent; approximately 10 short episodes.
 #
-# CONDITIONAL CI INCLUSION: until ≥1/10 smoke success is established,
+# CONDITIONAL CI INCLUSION: until >=1/10 smoke success is established,
 # this config is excluded from the default CI matrix and
 # is only run on explicit `--config configs/ci/aloha_gym_internvla_smoke.yaml`.
 #
-# Requires (started by CI before robo-eval run):
-#   VLA server : python -m sims.vla_policies.internvla_policy --port 5105
-#   Sim worker : MUJOCO_GL=egl python -m sims.sim_worker --sim aloha_gym \
-#                  --port 5304 --headless
+# Usage:
+#   roboeval serve --vla internvla --sim aloha_gym --headless &
+#   roboeval run -c configs/ci/aloha_gym_internvla_smoke.yaml
 
 name: ci_aloha_gym_internvla_smoke
 

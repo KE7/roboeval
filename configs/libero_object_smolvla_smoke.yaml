@@ -1,8 +1,7 @@
-# robo-eval smoke config: smolvla x libero_object (10 episodes, 1 task)
-# Usage: robo-eval run --config configs/libero_object_smolvla_smoke.yaml
-# Requires:
-#   VLA server: .venvs/smolvla/bin/python -m sims.vla_policies.smolvla_policy --port 5102
-#   Sim worker: .venvs/libero/bin/python -m sims.sim_worker --backend libero --port 5300 --headless
+# roboeval smoke config: smolvla x libero_object (10 episodes, 1 task)
+# Usage:
+#   roboeval serve --vla smolvla --sim libero --headless &
+#   roboeval run -c configs/libero_object_smolvla_smoke.yaml
 
 name: libero_object_smolvla_smoke
 
@@ -31,5 +30,5 @@ eval_python: ""
 # Output
 output_dir: results/libero_object_smolvla_smoke
 
-# Extra params passed to run_sim_eval.py (key -> value)
+# Extra params passed to roboeval.run_sim_eval (key -> value)
 params: {}

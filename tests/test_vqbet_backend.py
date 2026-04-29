@@ -147,13 +147,13 @@ class TestParityWithDiffusionPolicy:
 
 
 # ---------------------------------------------------------------------------
-# 4. Smoke YAML configs parse as valid robo-eval configs
+# 4. Smoke YAML configs parse as valid roboeval configs
 # ---------------------------------------------------------------------------
 
 
 class TestSmokeYaml:
     def test_gym_pusht_vqbet_smoke_yaml_parses(self):
-        from robo_eval.orchestrator import EvalConfig
+        from roboeval.orchestrator import EvalConfig
 
         yaml_path = PROJECT_ROOT / "configs" / "gym_pusht_vqbet_smoke.yaml"
         assert yaml_path.exists(), f"missing smoke config: {yaml_path}"
@@ -168,7 +168,7 @@ class TestSmokeYaml:
         assert "5108" in config.vla_url
 
     def test_ci_gym_pusht_vqbet_smoke_parses(self):
-        from robo_eval.orchestrator import EvalConfig
+        from roboeval.orchestrator import EvalConfig
 
         yaml_path = PROJECT_ROOT / "configs" / "ci" / "gym_pusht_vqbet_smoke.yaml"
         assert yaml_path.exists(), f"missing CI smoke config: {yaml_path}"
@@ -185,17 +185,17 @@ class TestSmokeYaml:
 
 class TestRegistration:
     def test_vqbet_in_vla_module_map(self):
-        from robo_eval.server_runner import _VLA_MODULE_MAP
+        from roboeval.server_runner import _VLA_MODULE_MAP
 
         assert _VLA_MODULE_MAP.get("vqbet") == "sims.vla_policies.vqbet_policy"
 
     def test_vqbet_default_port_is_5108(self):
-        from robo_eval.server_runner import _VLA_DEFAULT_PORTS
+        from roboeval.server_runner import _VLA_DEFAULT_PORTS
 
         assert _VLA_DEFAULT_PORTS.get("vqbet") == 5108
 
     def test_vqbet_in_vla_configs(self):
-        from robo_eval.config import VLA_CONFIGS
+        from roboeval.config import VLA_CONFIGS
 
         assert "vqbet" in VLA_CONFIGS
         cfg = VLA_CONFIGS["vqbet"]

@@ -1,11 +1,11 @@
-"""Tests for robo_eval.specs — ActionObsSpec interface specification utilities."""
+"""Tests for roboeval.specs — ActionObsSpec interface specification utilities."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from robo_eval.specs import (
+from roboeval.specs import (
     GRIPPER_CLOSE_NEG,
     GRIPPER_CLOSE_POS,
     HARD,
@@ -374,31 +374,31 @@ class TestCheckSpecs:
 
 class TestRegistry:
     def test_resolve_dimspec(self):
-        from robo_eval.registry import resolve_import_string
+        from roboeval.registry import resolve_import_string
 
-        cls = resolve_import_string("robo_eval.specs:ActionObsSpec")
+        cls = resolve_import_string("roboeval.specs:ActionObsSpec")
         assert cls is ActionObsSpec
 
     def test_resolve_constant(self):
-        from robo_eval.registry import resolve_import_string
+        from roboeval.registry import resolve_import_string
 
-        obj = resolve_import_string("robo_eval.specs:POSITION_DELTA")
+        obj = resolve_import_string("roboeval.specs:POSITION_DELTA")
         assert obj is POSITION_DELTA
 
     def test_resolve_invalid_path(self):
-        from robo_eval.registry import resolve_import_string
+        from roboeval.registry import resolve_import_string
 
         with pytest.raises(ValueError):
             resolve_import_string("no_colon_here")
 
     def test_resolve_missing_module(self):
-        from robo_eval.registry import resolve_import_string
+        from roboeval.registry import resolve_import_string
 
         with pytest.raises((ImportError, ModuleNotFoundError)):
             resolve_import_string("nonexistent_module_xyz:SomeClass")
 
     def test_resolve_missing_attr(self):
-        from robo_eval.registry import resolve_import_string
+        from roboeval.registry import resolve_import_string
 
         with pytest.raises(AttributeError):
-            resolve_import_string("robo_eval.specs:NonExistentClass")
+            resolve_import_string("roboeval.specs:NonExistentClass")

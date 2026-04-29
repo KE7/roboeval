@@ -1,18 +1,35 @@
-# Contributing to robo-eval
+# Contributing to roboeval
 
-Thank you for your interest in contributing! This document provides guidelines for contributing to the project.
+This document summarizes the public contribution workflow for roboeval.
+
+## Ways to Contribute
+
+roboeval accepts small fixes and larger compatibility additions. Good entry
+points include:
+
+- **Add a VLA** — implement the policy-server contract and registration path.
+  See [`docs/extending.md#add-a-vla`](docs/extending.md#add-a-vla).
+- **Add a simulator** — implement the simulator-backend contract and server
+  wiring. See [`docs/extending.md#add-a-simulator`](docs/extending.md#add-a-simulator).
+- **Improve docs** — file an issue or open a PR. Small corrections, clearer
+  setup notes, and reproducible examples are welcome.
+- **Report a bug** — use GitHub issues. Include your platform, Python version,
+  relevant package versions, reproduction steps, and the output of
+  `roboeval test --validate -c <config>.yaml`.
+- **Propose a design change** — use an issue or PR and link the relevant
+  decision record. See the [RFC index](docs/rfcs/index.md).
 
 ## Development Setup
 
 ```bash
 # Clone the repo
-git clone https://github.com/KE7/robo-eval.git && cd robo-eval
+git clone https://github.com/KE7/roboeval.git && cd roboeval
 
 # Install the CLI in development mode
 uv pip install -e ".[dev]"
 
-# Set up simulators (optional — only needed for running evaluations)
-bash scripts/setup_envs.sh --only libero
+# Set up a simulator (optional; only needed for running evaluations)
+roboeval setup libero
 ```
 
 ## Code Style
@@ -25,15 +42,21 @@ bash scripts/setup_envs.sh --only libero
 Run checks before submitting:
 
 ```bash
-ruff check robo_eval/ sims/ vlm_hl/
-black --check robo_eval/ sims/ vlm_hl/
-pytest tests/
+# 1. Lint and format
+ruff check .
+ruff format --check .
+
+# 2. Unit tests
+.venvs/roboeval/bin/python -m pytest -q tests/
+
+# 3. Spec-contract validation against an example config
+roboeval test --validate -c configs/libero_spatial_pi05_smoke.yaml
 ```
 
 ## Project Structure
 
-- `robo_eval/` — Core CLI package (Python 3.10+)
-- `sims/` — Simulator backends and VLA policy servers (may run in older Python venvs)
+- `roboeval/` — Core CLI package (Python 3.10+)
+- `sims/` — Simulator backends and VLA policy servers
 - `vlm_hl/` — VLM reasoning and plan generation
 - `scripts/` — Setup and launch scripts
 - `tests/` — Unit and integration tests
@@ -41,20 +64,56 @@ pytest tests/
 
 ## Adding a New VLA
 
-See [`docs/adding_a_vla.md`](docs/adding_a_vla.md) for a step-by-step guide. The template at `sims/vla_policies/template_policy.py` provides a starting point.
+See [`docs/extending.md`](docs/extending.md#add-a-vla) for the policy-server contract. The template at `sims/vla_policies/template_policy.py` provides a starting point.
 
 ## Adding a New Benchmark
 
-See [`docs/adding_a_benchmark.md`](docs/adding_a_benchmark.md) for how to integrate a new simulator.
+See [`docs/extending.md`](docs/extending.md#add-a-benchmark) for the simulator-backend contract.
+
+## Continuous Integration
+
+`.github/workflows/ci.yml` runs three jobs on every pull request and push to `main`:
+
+| Job | What it checks |
+|---|---|
+| `lint` | `ruff check` + `ruff format --check` across Python 3.11–3.13 |
+| `test` | `pytest tests/` across Python 3.11–3.13 |
+| `fresh-install-smoke` | `setup.sh libero` from a clean clone, then boots the sim worker and calls `/init` |
+
+These jobs run on standard GitHub-hosted runners and require no GPU.
+
+## Eval Results in Pull Requests
+
+GPU eval does not run in CI. If your PR adds or modifies a VLA policy, simulator backend, or evaluation config, please run the relevant smoke configs locally and paste the results as a comment on the PR before requesting review.
+
+Use `roboeval serve` + `roboeval run` against the configs under `configs/`:
+
+```bash
+# Example: new VLA on libero_spatial
+roboeval serve --vla <your_vla> --sim libero --headless &
+roboeval run -c configs/libero_spatial_<your_vla>_smoke.yaml
+```
+
+A minimal result comment looks like:
+
+```
+**Eval results** (local, 10 ep)
+| Pair | Score | Baseline | Delta |
+|---|---|---|---|
+| libero_spatial × <your_vla> | 8/10 | — | — |
+```
+
+Including a score helps reviewers gauge whether the change is a regression or improvement. PRs that affect evaluation behaviour without results may be held for author follow-up.
 
 ## Pull Request Process
 
 1. Fork the repository and create a feature branch
 2. Make your changes with clear commit messages
 3. Add tests for new functionality
-4. Ensure all existing tests pass
+4. Ensure all existing tests pass (`ruff check .`, `ruff format --check .`, `pytest tests/`)
 5. Update documentation if needed
-6. Submit a PR with a clear description of what and why
+6. If your change affects eval behaviour, run the relevant smoke configs locally and paste results as a PR comment (see [Eval Results in Pull Requests](#eval-results-in-pull-requests))
+7. Submit a PR with a clear description of what and why
 
 ## Reporting Issues
 
@@ -66,4 +125,4 @@ When reporting bugs, please include:
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions will be licensed under the BSD-3-Clause License.

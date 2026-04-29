@@ -41,6 +41,7 @@ import argparse
 import base64
 import logging
 import os
+import sys
 import tempfile
 from io import BytesIO
 from pathlib import Path
@@ -78,6 +79,38 @@ def _ensure_writable_hf_modules_cache() -> None:
 
 
 _ensure_writable_hf_modules_cache()
+
+
+def _force_hf_offline_for_cached_model(model_id: str) -> None:
+    """Force HF offline mode when the requested GR00T model is already cached."""
+    if os.environ.get("GROOT_FORCE_ONLINE") == "1":
+        return
+
+    import huggingface_hub
+    import huggingface_hub.constants
+
+    cached_config = huggingface_hub.try_to_load_from_cache(model_id, "config.json")
+    if cached_config is None or cached_config is huggingface_hub._CACHED_NO_EXIST:
+        return
+
+    missing_offline_flag = not (
+        os.environ.get("HF_HUB_OFFLINE") and os.environ.get("TRANSFORMERS_OFFLINE")
+    )
+    if not missing_offline_flag:
+        return
+
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    huggingface_hub.constants.HF_HUB_OFFLINE = True
+    transformers_hub = sys.modules.get("transformers.utils.hub")
+    if transformers_hub is not None:
+        transformers_hub._is_offline_mode = True  # noqa: SLF001
+    logger.info(
+        "GR00T model %s is cached at %s; forcing HF_HUB_OFFLINE=1 and "
+        "TRANSFORMERS_OFFLINE=1. Set GROOT_FORCE_ONLINE=1 to use Hugging Face online.",
+        model_id,
+        cached_config,
+    )
 
 
 def _resolve_embodiment_tag(tag_str: str):
@@ -126,6 +159,8 @@ class GR00TPolicy(VLAPolicyBase):
         action_key_filter: str = "",
         **_,
     ) -> None:
+        _force_hf_offline_for_cached_model(model_id)
+
         from gr00t.policy.gr00t_policy import Gr00tPolicy
 
         self.model_id = model_id

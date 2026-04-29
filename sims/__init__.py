@@ -1,4 +1,4 @@
-"""robo-eval simulator backends and environment wrappers.
+"""roboeval simulator backends and environment wrappers.
 
 This package contains:
   - ``sim_worker``: FastAPI HTTP server exposing simulator environments.

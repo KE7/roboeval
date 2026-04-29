@@ -288,7 +288,7 @@ class MySimBackend:
             "max_steps": 280,  # TODO: hard time limit for your tasks
             "delta_actions": False,  # TODO: True for EEF delta, False for absolute targets
             # ── Typed ActionObsSpec contracts (optional but recommended) ────────
-            # These are serialized via ActionObsSpec.to_dict() — see robo_eval/specs.py.
+            # These are serialized via ActionObsSpec.to_dict() — see roboeval/specs.py.
             # Uncomment and fill in to enable spec checking:
             #
             # "action_spec": {
@@ -359,7 +359,7 @@ class MySimBackend:
 #       "my_sim":   MySimBackend,          # key used in --sim and config YAML
 #   }
 #
-# Then register the default port/venv in robo_eval/server_runner.py:
+# Then register the default port/venv in roboeval/server_runner.py:
 #
 #   _SIM_DEFAULT_PORTS["my_sim"]  = 5304   # pick an unused port
 #   _SIM_DEFAULT_VENVS["my_sim"]  = ".venvs/my_sim"

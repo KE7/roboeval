@@ -1,13 +1,13 @@
-# CI smoke config: pi05 × libero_spatial
+# CI smoke config: pi05 x libero_spatial
 #
-# Gate: ≥1/10 episodes succeed (smoke, not benchmark).
+# Gate: >=1/10 episodes succeed (smoke, not benchmark).
 # Reference run: 92.8% raw on 250 episodes.
 # Mode: col1 (no-vlm, direct instruction, delta-actions).
-# Expected runtime: ~8 min on GB10 (10 eps × ~50 s/ep).
+# Expected runtime: ~8 min on GB10 (10 eps x ~50 s/ep).
 #
-# Requires (started by CI before robo-eval run):
-#   VLA server : python -m sims.vla_policies.pi05_policy  --port 5100
-#   Sim worker : python -m sims.sim_worker --sim libero --port 5300 --headless
+# Usage:
+#   roboeval serve --vla pi05 --sim libero --headless &
+#   roboeval run -c configs/ci/pi05_libero_spatial_smoke.yaml
 
 name: ci_pi05_libero_spatial_smoke
 

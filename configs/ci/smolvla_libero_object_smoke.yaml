@@ -1,13 +1,13 @@
-# CI smoke config: smolvla × libero_object
+# CI smoke config: smolvla x libero_object
 #
-# Gate: ≥1/10 episodes succeed (smoke, not benchmark).
+# Gate: >=1/10 episodes succeed (smoke, not benchmark).
 # Reference run: 86.7% on 15 episodes.
 # Mode: no-vlm (direct instruction, delta-actions).
-# Expected runtime: ~10 min on GB10 (10 eps × ~60 s/ep).
+# Expected runtime: ~10 min on GB10 (10 eps x ~60 s/ep).
 #
-# Requires (started by CI before robo-eval run):
-#   VLA server : python -m sims.vla_policies.smolvla_policy --port 5101
-#   Sim worker : python -m sims.sim_worker --sim libero --port 5300 --headless
+# Usage:
+#   roboeval serve --vla smolvla --sim libero --headless &
+#   roboeval run -c configs/ci/smolvla_libero_object_smoke.yaml
 
 name: ci_smolvla_libero_object_smoke
 

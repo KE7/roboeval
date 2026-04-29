@@ -1,22 +1,9 @@
-# robo-eval smoke config: ACT x gym-aloha (AlohaTransferCube-v0)
+# roboeval smoke config: ACT x gym-aloha (AlohaTransferCube-v0)
 #
 # Usage:
-#   robo-eval run --config configs/aloha_gym_act_liten_smoke.yaml
-#
-# Prerequisites:
-#   VLA server (Terminal 1):
-#     .venvs/act/bin/python -m sims.vla_policies.act_policy \
-#       --model-id lerobot/act_aloha_sim_transfer_cube_human \
-#       --port 5107 --device cuda
-#
-#   Sim worker (Terminal 2):
-#     MUJOCO_GL=egl \
-#       .venvs/aloha_gym/bin/python sims/sim_worker.py \
-#       --sim aloha_gym --port 5001 --headless
-#
-# Setup:
-#   gym-aloha integration must be installed: ./scripts/setup.sh act aloha_gym
-#
+#   roboeval serve --vla act --sim aloha_gym --headless &
+#   roboeval run -c configs/aloha_gym_act_liten_smoke.yaml
+
 # Action space:
 #   ACT outputs 14-dim absolute joint positions (7 joints × 2 arms).
 #   The gym-aloha backend accepts joint_pos_abs actions natively.
@@ -58,5 +45,5 @@ eval_python: ""
 # Output
 output_dir: results/act_smoke
 
-# Extra params passed to run_sim_eval.py (key -> value)
+# Extra params passed to roboeval.run_sim_eval (key -> value)
 params: {}

@@ -97,7 +97,7 @@ def _make_wrapper(
       - SimWrapper._post  (fakes /init)
       - requests.get  (fakes sim /info and VLA /health)
     """
-    from world_stubs import BaseWorldStub
+    from roboeval.world_stubs import BaseWorldStub
 
     # Dummy base init
     def fake_base_init(self, initial_image=None, task_instruction=None):

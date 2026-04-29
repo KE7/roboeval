@@ -1715,11 +1715,13 @@ _install_robotwin_planners_aarch64() {
     if [[ ! -x "$MM_BIN" ]]; then
         log_step "Installing micromamba (~10s, no sudo) → $MM_BIN..."
         mkdir -p "$(dirname "$MM_BIN")"
+        local _MM_TMP
+        _MM_TMP="$(mktemp -d)"
         curl -sL "https://micro.mamba.pm/api/micromamba/linux-aarch64/latest" \
-            -o /tmp/_mm.tar.bz2
-        tar -xjf /tmp/_mm.tar.bz2 -C /tmp bin/micromamba
-        mv /tmp/bin/micromamba "$MM_BIN"
-        rm -f /tmp/_mm.tar.bz2
+            -o "$_MM_TMP/micromamba.tar.bz2"
+        tar -xjf "$_MM_TMP/micromamba.tar.bz2" -C "$_MM_TMP" bin/micromamba
+        mv "$_MM_TMP/bin/micromamba" "$MM_BIN"
+        rm -rf "$_MM_TMP"
     fi
     export MAMBA_ROOT_PREFIX="$MM_ROOT"
 

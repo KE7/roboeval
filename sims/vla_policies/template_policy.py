@@ -14,7 +14,7 @@
 # ///
 """Template VLA policy server — copy this file and fill in the TODOs.
 
-See docs/adding_a_vla.md for the full walkthrough.
+See docs/extending.md for the full walkthrough.
 
 Usage:
     python -m sims.vla_policies.your_policy [--model-id MODEL] [--port PORT]

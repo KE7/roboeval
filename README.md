@@ -1,7 +1,5 @@
 # roboeval
 
-Host-process evaluation harness for Vision-Language-Action (VLA) models across multiple robotics simulators.
-
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://img.shields.io/github/actions/workflow/status/KE7/roboeval/ci.yml?branch=main&label=tests)](https://github.com/KE7/roboeval/actions/workflows/ci.yml)
@@ -19,7 +17,7 @@ The main contract surfaces are:
 | `ActionObsSpec` gate | VLA and simulator components declare action format, dimensionality, value range, camera roles, image format, state layout, and language inputs. Under the default strict mode, incompatible declarations stop the run before episode 1. |
 | Host-process isolation | VLA servers, simulator workers, and optional VLM proxy processes run in separate `.venvs/` environments. This allows different Python and CUDA dependency stacks to coexist without a monolithic runtime. |
 | Dependency isolation | Each VLA and simulator keeps its upstream package pins, Python version, CUDA assumptions, and optional micromamba/uv environment separate. This is a design choice: adding a new backend should not force the orchestrator or other backends onto the same dependency closure. |
-| LITEN-style hierarchical evaluation | The hierarchical mode integrates the VLM-planner method introduced by Ameesh Shah et al. The planner emits subtask calls that are executed by the same VLA server interface used for direct evaluation. roboeval is, to our knowledge, the first public VLA evaluation harness to ship a working LITEN integration. |
+| LITEN-style hierarchical evaluation | The hierarchical mode integrates the VLM-planner method introduced by Shah et al. ([Learning Affordances at Inference-Time for Vision-Language-Action Models](https://arxiv.org/abs/2510.19752)). The planner emits subtask calls that are executed by the same VLA server interface used for direct evaluation. roboeval is, to our knowledge, the first public VLA evaluation harness to ship a working LITEN integration. |
 | Result records | `roboeval run` writes JSON with harness version, config snapshot, per-episode metadata, success flags, and optional shard metadata. |
 
 ## Documentation map
@@ -77,8 +75,6 @@ Supported VLA launch names are `pi05`, `vqbet`, `tdmpc2`, `smolvla`, `openvla`, 
 - ManiSkill2 is platform-blocked on aarch64 because the required SAPIEN 2.x wheels are x86_64-only.
 - `bridge_octo` is platform-blocked on aarch64 by its current TensorFlow/dlimp dependency chain and does not ship in the v0.1.0 support matrix.
 - Some technically expressible pairs remain capability boundaries and do not ship root configs, including RoboCasa x GR00T.
-- v0.1.0 publishes smoke validation paths only; it does not publish statistical-confidence benchmark sweeps.
-- The VLM proxy is currently optimized for Qwen-family planners. LITEN integration has been tested with Qwen3.6-27B; other VLM endpoints can be reached through LiteLLM but are not specifically tested.
 
 ## Planned features
 

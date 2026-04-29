@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 # ---------------------------------------------------------------------------
 # Dependency model
 #
-# The top-level `robo-eval` package is the orchestrator (Python 3.13 venv, supports ≥3.11).
+# The top-level `roboeval` package is the orchestrator (Python 3.13 venv, supports ≥3.10).
 # Simulator and VLA backends run in isolated venvs because they have
 # incompatible Python version and dependency requirements:
 #
@@ -25,8 +25,8 @@ build-backend = "setuptools.build_meta"
 #   LiteLLM/VLM    .venvs/litellm        3.11     vlm
 #
 # One-command setup:
-#   ./scripts/setup.sh pi05 libero        # provisions only Pi 0.5 + LIBERO
-#   ./scripts/setup.sh --help             # full usage
+#   roboeval setup pi05 libero        # provisions only Pi 0.5 + LIBERO
+#   roboeval setup --help             # full usage
 #
 # Manual per-venv install (Python 3.11 components):
 #   uv venv .venvs/pi05 --python 3.11
@@ -37,40 +37,41 @@ build-backend = "setuptools.build_meta"
 # ---------------------------------------------------------------------------
 
 [project]
-name = "robo-eval"
+name = "roboeval"
 version = "0.1.0"
-description = "A reproducible evaluation harness for Vision-Language-Action models on robotics benchmarks."
+description = "VLA evaluation harness across simulators with hard-fail spec contracts and hierarchical-mode evaluation"
 authors = [
     {name = "Karim Elmaaroufi", email = "k.e@berkeley.edu"},
 ]
-license = {text = "BSD-3-Clause"}
+license = {file = "LICENSE"}
 readme = "README.md"
-requires-python = ">=3.11"
-keywords = ["robotics", "vla", "evaluation", "benchmark", "libero"]
+requires-python = ">=3.10"
+keywords = ["vla", "robotics", "evaluation", "simulation", "lerobot"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "License :: OSI Approved :: BSD License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 dependencies = [
-    "numpy",
-    "openai",
-    "pillow",
-    "opencv-python",
-    "tqdm",
-    "pydantic",
-    "typer",
-    "requests",
-    "httpx",
-    "fastapi",
-    "uvicorn[standard]",
-    "litellm",
+    "typer>=0.9",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.22",
+    "httpx>=0.24",
+    "pydantic>=1.10",
+    "pyyaml>=6.0",
+    "numpy>=1.24",
+    "requests>=2.31",
+    "pillow>=9.0",
 ]
 
 [project.optional-dependencies]
 # ---------------------------------------------------------------------------
-# VLA backends — each installs into its own dedicated venv via setup.sh.
+# VLA backends — each installs into its own dedicated venv via roboeval setup.
 # Python version notes:
 #   pi05     → 3.12  (lerobot[pi]==0.5.2 requires Python>=3.12)
 #   all others → 3.11
@@ -85,7 +86,7 @@ dependencies = [
 #   which conflicts with openvla's transformers==4.40.1 in the `all` extra.
 #   The working venvs use lerobot 0.4.5 (installed from git; not on PyPI) which
 #   uses Python>=3.10 and a custom transformers branch (fix/lerobot_openpi).
-#   setup.sh installs lerobot[pi] via:
+#   roboeval setup installs lerobot[pi] via:
 #     uv pip install "lerobot[pi] @ git+https://github.com/huggingface/lerobot.git@v0.4.5"
 #   This dependency cannot be expressed in the lockfile without breaking openvla.
 pi05 = [
@@ -96,7 +97,7 @@ pi05 = [
     "numpy>=1.24",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.22",
-    # lerobot[pi]: installed by setup.sh separately (see note above)
+    # lerobot[pi]: installed by roboeval setup separately (see note above)
 ]
 
 # === START vqbet ===
@@ -156,7 +157,7 @@ smolvla = [
 ]
 
 # GR00T-N1.6 (NVIDIA Isaac GR00T, pinned to a tested public revision).
-# NOTE: `gr00t` itself is NOT on PyPI.  `setup.sh` clones Isaac-GR00T, checks out
+# NOTE: `gr00t` itself is NOT on PyPI.  `roboeval setup` clones Isaac-GR00T, checks out
 # the pinned N1.6 revision, and `uv pip install -e`s it (with deps from gr00t's own
 # pyproject — transformers==4.51.3, torch==2.7.1, etc.).  These extras are the
 # server-side closure (FastAPI + image utils) plus aarch64 lib provisioners.
@@ -228,7 +229,7 @@ cosmos = [
 # === START internvla_runtime ===
 # Full runtime closure for InternVLA-A1.
 # InternVLA-A1/pyproject.toml pins huggingface-hub<0.36.0 which conflicts with modern
-# transformers (needed for Qwen3VL). setup.sh installs InternVLA-A1 with --no-deps to
+# transformers (needed for Qwen3VL). roboeval setup installs InternVLA-A1 with --no-deps to
 # bypass that constraint, so the extras here do NOT carry the <0.36.0 bound.
 # Also adds mediapy, loguru, omegaconf — imported by InternVLA-A1 code but missing
 # from its upstream pyproject.toml deps.
@@ -305,7 +306,7 @@ act = [
 # Paradigm: model-based RL (the first non-imitation VLA in the roster).
 #
 # Install note: nicklashansen/tdmpc2 upstream has no pyproject.toml — not
-# pip-installable via PyPI.  setup_tdmpc2() in scripts/setup.sh clones the
+# pip-installable via PyPI.  setup_tdmpc2() in roboeval setup clones the
 # upstream repo, adds a thin shim, and installs as an editable package.
 # The `tensordict` dep below is required by the upstream's vectorised
 # Q-function Ensemble (TensorDictParams API).  `lerobot>=0.4.4` provides
@@ -351,7 +352,7 @@ diffusion_policy = [
 #
 # libero / libero_pro use Python 3.8 — `uv pip install -e .[libero]` won't
 # work in a 3.8 venv because requires-python=>=3.11 blocks it.
-# setup.sh installs these via requirements/ files directly.
+# roboeval setup installs these via requirements/ files directly.
 # The extras below are kept for documentation purposes and for any future
 # Python 3.11-compatible LIBERO variant.
 #
@@ -369,12 +370,12 @@ libero = [
     "numpy>=1.24",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.22",
-    "robosuite @ git+https://github.com/ARISE-Initiative/robosuite.git@master",
-    "libero @ git+https://github.com/Lifelong-Robot-Learning/LIBERO.git",
+    # robosuite and libero are installed from source by `roboeval setup libero`
+    # (not on PyPI; setup.sh clones and installs them into .venvs/libero)
 ]
 
 # LIBERO-Pro (Zxy-MLlab fork, extended task suites).
-# Python 3.8 required. libero-pro is installed from a local clone by setup.sh;
+# Python 3.8 required. libero-pro is installed from a local clone by roboeval setup;
 # the fork is not on PyPI and must be checked out separately.
 libero_pro = [
     "h5py>=3.8",
@@ -384,15 +385,14 @@ libero_pro = [
     "numpy>=1.24",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.22",
-    "robosuite @ git+https://github.com/ARISE-Initiative/robosuite.git@master",
-    # libero-pro itself: installed from local clone by setup.sh
-    # git clone https://github.com/Zxy-MLlab/LIBERO-PRO.git
+    # robosuite and libero-pro are installed from source by `roboeval setup libero_pro`
+    # (not on PyPI; setup.sh clones and installs them into .venvs/libero_pro)
 ]
 
 # === START libero_infinity ===
 # LIBERO-Infinity (Scenic-based perturbation testing on LIBERO environments).
 # Python 3.11 required (libero-infinity on PyPI requires >=3.11).
-# LIBERO upstream is cloned by setup.sh into $ROBO_EVAL_VENDORS_DIR/LIBERO
+# LIBERO upstream is cloned by roboeval setup into $ROBOEVAL_VENDORS_DIR/LIBERO
 # and installed editable into .venvs/libero_infinity alongside libero-infinity.
 libero_infinity = [
     "h5py>=3.8",
@@ -403,11 +403,10 @@ libero_infinity = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.22",
     "scenic>=3.0.0",
-    "robosuite @ git+https://github.com/ARISE-Initiative/robosuite.git@master",
     # libero-infinity itself (PyPI, requires Python >=3.11):
     "libero-infinity>=0.1.0",
-    # LIBERO upstream: installed editable from local clone by setup.sh
-    # git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git
+    # robosuite and LIBERO upstream are installed from source by `roboeval setup libero_infinity`
+    # (not on PyPI; setup.sh clones and installs them into .venvs/libero_infinity)
 ]
 # === END libero_infinity ===
 
@@ -420,15 +419,15 @@ robocasa = [
     "numpy>=1.24",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.22",
-    "robosuite @ git+https://github.com/ARISE-Initiative/robosuite.git@master",
-    "robocasa @ git+https://github.com/robocasa/robocasa.git",
+    # robosuite and robocasa are installed from source by `roboeval setup robocasa`
+    # (not on PyPI; setup.sh clones and installs them into .venvs/robocasa)
 ]
 
 # RoboTwin 2.0 (SAPIEN-based bimanual, aloha-agilex).
 # Python 3.10 required; same caveat as libero re: requires-python.
-# NOTE: sapien is on a nightly index, not PyPI:
-#   pip install sapien --pre --extra-index-url https://storage.googleapis.com/sapien-nightly/
-# NOTE: RoboTwin itself must be cloned into $ROBO_EVAL_VENDORS_DIR/RoboTwin.
+# NOTE: sapien is installed by scripts/setup.sh.  Linux/aarch64 uses the
+# official SAPIEN GitHub release wheel when pip indexes do not expose cp310.
+# NOTE: RoboTwin itself must be cloned into $ROBOEVAL_VENDORS_DIR/RoboTwin.
 # CRITICAL import order: `import torch` MUST come before `import sapien` in the same process.
 robotwin = [
     "torch>=2.0",
@@ -440,8 +439,8 @@ robotwin = [
     # === START robotwin_hfhub ===
     "huggingface-hub>=0.20",
     # === END robotwin_hfhub ===
-    # sapien: installed from nightly index by setup.sh (not on PyPI)
-    # robotwin: installed from local vendor clone by setup.sh
+    # sapien: installed by roboeval setup (package index or platform wheel)
+    # robotwin: installed from local vendor clone by roboeval setup
 ]
 
 # gym-aloha (HuggingFace's pure-Python ALOHA bimanual sim).
@@ -489,10 +488,10 @@ gym_pusht = [
 # Renderer : SAPIEN (sapien==2.2.2, x86_64 only on PyPI)
 # Action   : pd_ee_delta_pose 7-dim (6 EEF delta + 1 gripper)
 # Tasks    : PickCube-v0, StackCube-v0, PegInsertionSide-v0
-# Install  : ./scripts/setup.sh maniskill2
+# Install  : roboeval setup maniskill2
 #
 # Note: sapien==2.2.2 is NOT pinned here to avoid polluting solver state for
-# aarch64 CI.  setup.sh installs it explicitly with --extra-index-url if
+# aarch64 CI.  roboeval setup installs it explicitly with --extra-index-url if
 # needed on x86_64.  See docs/install.md#maniskill2.
 maniskill2 = [
     "mani_skill2==0.5.3",
@@ -506,9 +505,9 @@ maniskill2 = [
     "uvicorn[standard]>=0.22",
     "transforms3d",
     "trimesh",
-    # sapien==2.2.2 is installed by setup.sh; NOT listed here because it has
+    # sapien==2.2.2 is installed by roboeval setup; NOT listed here because it has
     # no aarch64 wheel and would break `uv pip install -e .[maniskill2]` on
-    # aarch64 machines.  x86_64: setup.sh runs
+    # aarch64 machines.  x86_64: roboeval setup runs
     #   uv pip install sapien==2.2.2
     # after the extra is installed.
 ]
@@ -524,7 +523,7 @@ maniskill2 = [
 # Renderer : MuJoCo (mujoco.Renderer, corner + behindGripper cameras)
 # Action   : 4-dim eef-delta [dx, dy, dz, gripper]  range [-1, 1]
 # Tasks    : ~50 (button-press-v2, pick-place-v2, door-open-v2, reach-v2, …)
-# Install  : ./scripts/setup.sh metaworld
+# Install  : roboeval setup metaworld
 #
 # NOTE — action-dim mismatch with current 7-dim VLAs:
 #   Pi0.5 / SmolVLA / OpenVLA all emit 7-dim actions.  The ActionObsSpec gate
@@ -562,6 +561,7 @@ dev = [
     "ruff>=0.4",
     "black>=24.0",
     "scipy>=1.11",
+    "opencv-python-headless>=4.8.0",
 ]
 
 # all — CI-installable superset of non-conflicting extras.
@@ -569,33 +569,35 @@ dev = [
 # Why not everything?
 #   The ML components (VLAs + sims) have mutually incompatible transitive deps
 #   (lerobot 0.3.3 vs 0.4.4, transformers ==4.40.1 vs >=5.3) that prevent them from
-#   sharing a single venv. That's the entire reason setup.sh creates one venv per
+#   sharing a single venv. That's the entire reason roboeval setup creates one venv per
 #   component. "all" therefore covers the orchestrator layer only:
 #   dev toolchain + VLM mode + all lockable sim/VLA framework deps (no ML models).
 #
 # To install every VLA + sim in isolated venvs, run:
-#   ./scripts/setup.sh all
+#   roboeval setup all
 all = [
-    "robo-eval[vlm,dev]",
+    "roboeval[vlm,dev]",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/KE7/roboeval"
-"Bug Tracker" = "https://github.com/KE7/roboeval/issues"
+Homepage = "https://github.com/KE7/roboeval"
+Repository = "https://github.com/KE7/roboeval"
+Issues = "https://github.com/KE7/roboeval/issues"
+Changelog = "https://github.com/KE7/roboeval/releases"
 
 # ---------------------------------------------------------------------------
 # Console scripts
 # ---------------------------------------------------------------------------
 
 [project.scripts]
-# 4-subcommand CLI: run / serve / merge / test
-robo-eval = "robo_eval.cli.main:main"
+# 5-subcommand CLI: setup / run / serve / merge / test
+roboeval = "roboeval.cli.main:app"
 
 # ---------------------------------------------------------------------------
 # Other entry points (not registered — run via their specific venvs):
 #
-#   run_sim_eval.py  — robo-eval sim eval
-#   run.py           — physical-robot CLI
+#   python -m roboeval.run_sim_eval  — roboeval sim eval
+#   python -m roboeval.run           — physical-robot CLI
 #   scripts/run_openvla_native_eval.py — native OpenVLA eval
 # ---------------------------------------------------------------------------
 
@@ -642,10 +644,16 @@ conflicts = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = [
-    "robo_eval",
-    "robo_eval.*",
+    "roboeval",
+    "roboeval.*",
     "sims",
     "sims.*",
+]
+
+[tool.setuptools.package-data]
+roboeval = [
+    "../scripts/*.sh",
+    "../configs/**/*.yaml",
 ]
 
 # ---------------------------------------------------------------------------
@@ -662,7 +670,7 @@ exclude = [
     ".venvs",
     "__pycache__",
     "*.egg-info",
-    "world_stubs.py",
+    "roboeval/world_stubs.py",
     "monitor_actions.py",
 ]
 
@@ -676,7 +684,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["robo_eval", "sims"]
+known-first-party = ["roboeval", "sims"]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests intentionally mutate sys.path / install stubs before importing source;

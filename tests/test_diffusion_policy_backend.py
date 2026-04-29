@@ -116,7 +116,7 @@ class TestActionObsSpec:
         assert "eef_xy" in spec
 
     def test_pusht_action_spec_position_dims(self):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
 
         server = _make_mock_policy(action_dim=2)
         spec = server.get_action_spec()
@@ -142,7 +142,7 @@ class TestActionObsSpec:
         assert "primary" in obs
 
     def test_observation_spec_state_dim_matches(self):
-        from robo_eval.specs import ActionObsSpec
+        from roboeval.specs import ActionObsSpec
 
         server = _make_mock_policy(state_dim=2)
         obs = server.get_observation_spec()

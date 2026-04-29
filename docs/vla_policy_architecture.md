@@ -1,12 +1,11 @@
 # VLA Policy Architecture — Developer Guide
 
-**Status:** Current (post-refactor, production)
-**Branch:** sim-integration
+**Status:** Current for the v0.1 release
 **Last updated:** 2026-03-02
 
 This document is the authoritative reference for adding new simulators and VLA policy servers to
-LITEN. Read it before writing any new code. Every major section documents hard-won lessons from
-bugs that cost days of debugging.
+roboeval. Read it before writing any new integration code. Every major section documents
+compatibility requirements that affect evaluation correctness.
 
 ---
 
@@ -19,9 +18,8 @@ bugs that cost days of debugging.
 5. [Sim Worker Patterns](#5-sim-worker-patterns)
 6. [Adding a New Simulator](#6-adding-a-new-simulator)
 7. [Adding a New VLA Policy Server](#7-adding-a-new-vla-policy-server)
-8. [Key Lessons Learned](#8-key-lessons-learned)
-9. [Benchmark Reference](#9-benchmark-reference)
-10. [Port Reference](#10-port-reference)
+8. [Compatibility Reference](#8-compatibility-reference)
+9. [Port Reference](#9-port-reference)
 
 ---
 
@@ -34,14 +32,14 @@ Mixing environments causes silent dependency conflicts that are very hard to deb
 |------|--------|---------|--------------|
 | `.venvs/vla/` | 3.11 | pi05 + openvla policy servers | lerobot 0.4.5, torch 2.10+cu130, transformers, safetensors, timm<1.0.0 |
 | `.venvs/smolvla/` | 3.11 | smolvla policy server | lerobot 0.4.5, torch 2.10+cu130, libero (editable), robosuite 1.4.0 |
-| `.venvs/libero/` | 3.8.20 | LIBERO sim worker | libero (editable, cloned by `scripts/setup_envs.sh`), FastAPI, uvicorn |
-| `.venvs/libero_pro/` | 3.8 | LIBERO-Pro sim worker | libero-pro (editable, cloned by `scripts/setup_envs.sh`), FastAPI, uvicorn |
-| `.venvs/litellm/` | 3.11 | `run_sim_eval.py` orchestrator | litellm, requests, Pillow — **no lerobot** |
+| `.venvs/libero/` | 3.8.20 | LIBERO sim worker | libero (editable, cloned by `roboeval setup`), FastAPI, uvicorn |
+| `.venvs/libero_pro/` | 3.8 | LIBERO-Pro sim worker | libero-pro (editable, cloned by `roboeval setup`), FastAPI, uvicorn |
+| `.venvs/litellm/` | 3.11 | VLM planner proxy | litellm, requests, Pillow — **no lerobot** |
 | `.venvs/robocasa/` | 3.11 | RoboCasa sim worker | robocasa, robosuite 1.5.2, FastAPI, uvicorn |
 | `.venvs/robotwin/` | 3.10 | RoboTwin sim worker | SAPIEN 3.0.0, torch 2.10+cu130, FastAPI |
 
 **Critical rules:**
-- `run_sim_eval.py` MUST run under `.venvs/litellm/bin/python`. It has litellm; the vla venv does not.
+- VLM-planner commands MUST run under `.venvs/litellm/bin/python`. It has litellm; the vla venv does not.
 - smolvla has a separate venv from vla because `timm>=0.9.10,<1.0.0` (required by openvla) conflicts
   with smolvla's requirements. Each model family gets its own venv when deps conflict.
 - The libero sim workers use Python 3.8 because LIBERO's deps (older robosuite, bddl) require it.
@@ -58,7 +56,7 @@ incompatible dependencies.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  run_sim_eval.py  (.venvs/litellm/, port varies)                        │
+│  Orchestrator / planner process  (.venvs/litellm/, port varies)          │
 │                                                                          │
 │   ┌──────────────┐    HTTP     ┌──────────────────────────────────────┐  │
 │   │  VLM proxy   │◄──────────►│  VLM (LiteLLM/Gemini)  port 4000    │  │
@@ -194,21 +192,10 @@ image flipping, resizing, normalization, state encoding, or action postprocessin
 from lerobot.policies.factory import make_pre_post_processors
 ```
 
-This function loads the exact same pipeline steps that `lerobot-eval` uses, guaranteeing
-byte-for-byte identical behavior to the native evaluation tool.
+This function loads the exact same pipeline steps that `lerobot-eval` uses, keeping
+the policy server aligned with the native evaluation tool.
 
-### Why This Matters — Confirmed Bug History
-
-Manual preprocessing diverges from the training distribution in subtle but catastrophic ways.
-This was confirmed empirically with smolvla_libero: before fixing, every manual preprocessing
-error alone caused **0% task success** on a finetuned model. Bugs included:
-
-- Wrong image normalization (different mean/std than training)
-- Missing or incorrect image flip (lerobot uses `torch.flip(img, dims=[2,3])` — a 180° rotation)
-- Using `chunk_size=50` instead of `n_action_steps=1` → only ~10 replans per episode instead of 500
-- Wrong state normalization (different scale or missing entirely)
-
-### Canonical Pattern (smolvla_policy.py — the gold standard)
+### Reference Pattern
 
 ```python
 from lerobot.policies.factory import make_pre_post_processors
@@ -278,9 +265,8 @@ actions = [action.squeeze(0).tolist()]  # [[float × dim]]
 **pi05_policy.py**: Does NOT use `make_pre_post_processors`. Pi05 uses a special prompt format
 where the robot state is discretized into 256-bin tokens embedded in the text prompt
 (`"Task: ..., State: <bins>;\nAction: "`). This requires direct tokenizer access that the
-standard preprocessor pipeline does not expose cleanly. The manual approach in pi05_policy.py
-has been validated to match lerobot-eval (confirmed by 93–98% LITEN scores vs 83–93% native).
-Do not replace it without verifying parity.
+standard preprocessor pipeline does not expose cleanly. Keep this implementation aligned with
+the upstream Pi policy interface and run compatibility checks before changing it.
 
 **openvla_policy.py**: OpenVLA is NOT a lerobot model. It uses HuggingFace `AutoProcessor` +
 `AutoModelForVision2Seq` from transformers. Do NOT attempt to use `make_pre_post_processors` on
@@ -290,8 +276,8 @@ non-lerobot checkpoints — use the model's own native processor.
 
 | Policy Server | Model Type | Preprocessing | Status |
 |---|---|---|---|
-| `pi05_policy.py` | lerobot | Manual (custom tokenization, validated) | Working — do not change without parity test |
-| `smolvla_policy.py` | lerobot | `make_pre_post_processors` ✓ | Gold standard template |
+| `pi05_policy.py` | lerobot | Manual custom tokenization | Supported special case |
+| `smolvla_policy.py` | lerobot | `make_pre_post_processors` ✓ | Reference template |
 | `openvla_policy.py` | non-lerobot (OpenVLA) | Native `AutoProcessor` ✓ | Correct for this model type |
 
 ---
@@ -315,7 +301,8 @@ def _extract_image(self, obs):
     )
 ```
 
-**Do NOT flip again in the policy server.** Double-flip = 0% success (confirmed).
+**Do NOT flip again in the policy server.** A second flip sends the policy a camera
+orientation that does not match the training/evaluation pipeline.
 
 ### State Extraction — `_extract_state()`
 
@@ -373,7 +360,7 @@ def reset(self, episode_index=None):
         self.env.step(dummy_action)           # 6. 10 no-op steps to settle physics
 ```
 
-**Missing `set_init_state()`** = wrong initial object positions = wrong task = 0% success.
+**Missing `set_init_state()`** = wrong initial object positions and therefore the wrong task.
 **Warmup gripper must be `[0,0,0,0,0,0,-1]`** (closed). Using `[0]*7` (gripper open) diverges
 from lerobot's `get_libero_dummy_action()` and causes physics settling differences.
 
@@ -470,7 +457,7 @@ BACKENDS = {
 - [ ] Read camera keys from `policy.config.image_features` — do NOT hardcode key names
 - [ ] Pick an unused port (5100=pi05, 5101=openvla, 5102=smolvla, 5103+ for new ones)
 - [ ] Create a start script in `scripts/`
-- [ ] Test parity with native `lerobot-eval` before declaring the server working
+- [ ] Check compatibility with native `lerobot-eval` before declaring the server working
 - [ ] Use `.venvs/vla/` or create a new venv if deps conflict
 
 ### Template (condensed from smolvla_policy.py)
@@ -595,156 +582,48 @@ def predict(req: PredictRequest):
         return JSONResponse(500, {"error": str(e), "traceback": traceback.format_exc()})
 ```
 
-### Parity Test Before Declaring Done
+### Compatibility Check Before Declaring Done
 
-Always verify your policy server matches native `lerobot-eval` on at least one task:
+Check that your policy server matches native `lerobot-eval` behavior on at least one task:
 
 ```bash
-# 1. Run native lerobot-eval (ground truth)
+# 1. Run native lerobot-eval
 MUJOCO_GL=egl .venvs/vla/bin/lerobot-eval \
   --policy.path=org/my-model --env.type=libero \
   --env.task=libero_spatial --eval.batch_size=1 --eval.n_episodes=5
 
 # 2. Run LITEN pipeline with new policy server
-MUJOCO_GL=egl .venvs/litellm/bin/python run_sim_eval.py \
+MUJOCO_GL=egl .venvs/litellm/bin/python -m roboeval.run_sim_eval \
   --no-vlm --suite libero_spatial --episodes 5 \
   --vla-url http://localhost:5103
 
-# Results should be within ~5% of each other.
-# If LITEN score is 0% but native is >0%, there is a preprocessing bug.
+# Compare preprocessing, camera orientation, state encoding, and action conventions.
+# If the two paths diverge systematically, inspect those interfaces first.
 ```
 
 ---
 
-## 8. Key Lessons Learned
+## 8. Compatibility Reference
 
-These are bugs that caused significant wasted effort. Read them before writing new code.
+This architecture document records implementation contracts and parity checks, not benchmark results.
 
-### Image Processing
-
-**Double-flip = 0% success.** `sim_worker._extract_image()` flips images once (180° rotation).
-Do NOT flip again in the policy server. The flip in sim_worker matches lerobot's
-`LiberoProcessorStep` which does `torch.flip(img, dims=[2,3])`. Adding a second flip sends the
-robot an upside-down view of the world and causes 0% success.
-
-### Action Chunk Size
-
-**`n_action_steps` ≠ `chunk_size`.** Always read `n_action_steps` from the model config, not
-`chunk_size`. For smolvla_libero: `chunk_size=50` but `n_action_steps=1`. Using `chunk_size=50`
-means only ~10 replans per 500-step episode instead of 500 — the robot gets stuck executing
-stale actions. This caused 0% success before the fix.
-
-### LIBERO Episode Initialization
-
-**`set_init_state()` is mandatory.** Without it, LIBERO uses random initial object positions that
-don't match the task's intended configuration. Also: `episode_index` must be passed correctly —
-using index 0 for every episode means the same initial state is reused, which inflates variance
-and doesn't match the evaluation protocol.
-
-### OpenVLA Gripper Convention
-
-**RLDS convention is inverted from LIBERO.** OpenVLA was trained with RLDS where `1=close,
--1=open`. LIBERO uses the opposite: `-1=close, 1=open`. The policy server must binarize and
-invert: `gripper = -(1.0 if action[-1] > 0.0 else -1.0)`. Without this, the robot's gripper
-always does the opposite of what the model intends.
-
-### VLM Context Overflow
-
-**Use `--experience-dir` per task, not shared.** The VLM accumulates experience (subtask history,
-scene descriptions) across episodes. If a shared experience directory is used across all tasks in
-a suite, the context window fills up and the VLM starts making poor decisions by task 5+. Always
-pass a fresh `--experience-dir` for each task.
-
-### VLM Instruction Rewriting Bug
-
-**The VLM rewrites task instructions** (e.g. "black bowl" → "silver bowl"), directing the policy
-to the wrong object. This is a known open issue causing degraded col3 (LITEN+VLM) results on
-libero_10. The issue is in the VLM planner, not the policy pipeline.
-
-### Port Conflicts and Stale Workers
-
-**Always start fresh on a new port after code changes.** Sim workers stay bound to their ports
-even when the process should have exited. After changing `smolvla_policy.py` or `sim_worker.py`,
-kill old processes and restart on a new port, then verify the new code is running.
-
-### Model Loading Time
-
-**Poll `/health` before sending requests.** Pi05 takes ~75s to load; smolvla ~40s. Sending a
-`/predict` request before the model is ready returns a 503 error. Always poll with exponential
-backoff until `ready: true`.
-
-### Native lerobot-eval Episode Count
-
-**`--eval.n_episodes=N` is per task, not total.** With 10 tasks and `--eval.n_episodes=10`,
-lerobot-eval runs 100 episodes total. Results should be reported as a percentage of the total.
-
-### GPU Memory
-
-**Kill pi05 server before running native lerobot-eval.** Pi05 and lerobot-eval together exceed
-GPU memory on the GB10. Kill the server first: `pkill -f pi05_policy`. Same for smolvla.
-
-### PyTorch 2.10 Compatibility
-
-**Attention mask must be `.bool()`.** PyTorch 2.10 on aarch64/GB10 fails in torch.compile with
-`"expected predicate to be bool, got torch.int64"`. Cast the tokenizer's `attention_mask` to
-`.bool()` before passing to the model. Also unwrap `_torchdynamo_orig_callable` on compiled
-functions (see pi05_policy.py for the pattern).
-
-### Normalization Stats Location
-
-**`meta/stats.json` does NOT always exist.** The actual stats are in
-`policy_postprocessor_step_0_unnormalizer_processor.safetensors` in the HF cache snapshot
-directory. `make_pre_post_processors()` handles this automatically — yet another reason to use it
-instead of manual unnormalization.
+When validating a policy server against a native upstream evaluator, use a small task subset to confirm preprocessing, camera orientation, state encoding, and gripper convention. Treat those checks as compatibility evidence unless you run a full benchmark sweep with a fixed protocol and statistical reporting.
 
 ---
 
-## 9. Benchmark Reference
-
-### Confirmed Results (10 eps/task, 2026-03-01)
-
-Policy: `lerobot/pi05_libero_finetuned`. LIBERO benchmark.
-LITEN runs used `--delta-actions` and `--experience-dir` per task.
-Native runs used `lerobot-eval` with `--eval.n_episodes=10`.
-
-| Suite | LITEN no-VLM (col1) | Native lerobot-eval (col2) | LITEN+VLM (col3) |
-|-------|--------------------|-----------------------------|------------------|
-| libero_spatial | **94%** (94/100) | 85% (170/200)† | 75% (75/100) |
-| libero_object  | **96%** (96/100) | 89% (89/100) | 75% (75/100) |
-| libero_goal    | **98%** (98/100) | 93% (93/100) | 87% (87/100) |
-| libero_10      | **77%** (77/100) | 83% (83/100) | 33% (33/100)‡ |
-
-† libero_spatial native used 20 eps/task (200 total); all others 10 eps/task.
-‡ libero_10 col3 degraded by the VLM instruction rewriting bug (open issue).
-
-**LITEN no-VLM exceeds native lerobot-eval on 3 of 4 suites.** The pipeline overhead is
-negligible; the advantage comes from deterministic episode initialization and subtask framing.
-
-### Confirmed Results for Other Models (partial)
-
-| Model | Suite | Method | Result |
-|-------|-------|--------|--------|
-| `openvla/openvla-7b-finetuned-libero-spatial` | libero_spatial | Native (5/10 tasks, 20 eps each) | 76% partial |
-| `HuggingFaceVLA/smolvla_libero` | libero_spatial | Native lerobot-eval (1 ep/task) | 90% |
-| `lerobot/smolvla_base` | all suites | LITEN col1+col3 | 0% (no gripper output) |
-
-See `docs/benchmark_results.md` for full per-task breakdowns.
-
----
-
-## 10. Port Reference
+## 9. Port Reference
 
 | Port | Service | Venv | Start Command |
 |------|---------|------|---------------|
 | 4000 | LiteLLM VLM proxy (Gemini) | `.venvs/litellm/` | `scripts/start_vlm.sh` |
 | 5001 | Sim worker (default) | sim-specific | `MUJOCO_GL=egl .venvs/libero/bin/python sims/sim_worker.py --sim libero --port 5001 --headless` |
-| 5100 | pi05 policy server | `.venvs/vla/` | `scripts/start_pi05_policy.sh` |
-| 5101 | openvla policy server | `.venvs/vla/` | `scripts/start_openvla_policy.sh` |
+| 5100 | pi05 policy server | `.venvs/vla/` | `roboeval serve --vla pi05` |
+| 5101 | openvla policy server | `.venvs/vla/` | `roboeval serve --vla openvla --vla-port 5101` |
 | 5102 | smolvla policy server | `.venvs/smolvla/` | `MUJOCO_GL=egl .venvs/smolvla/bin/python -m sims.vla_policies.smolvla_policy --port 5102` |
-| 5103+ | future policy servers | new venv | create `scripts/start_<model>_policy.sh` |
+| 5103+ | future policy servers | new venv | register the policy module for `roboeval serve --vla <model>` |
 
 **Note:** The sim worker port (default 5001) can be changed with `--port`. Use a different port if
 running multiple simulators in parallel (e.g., 5001 for libero, 5002 for robocasa).
 
-Multiple sim workers can run simultaneously on different ports. Each `run_sim_eval.py` invocation
+Multiple sim workers can run simultaneously on different ports. Each evaluation invocation
 specifies which sim worker and policy server URLs to use via `--sim-url` and `--vla-url`.

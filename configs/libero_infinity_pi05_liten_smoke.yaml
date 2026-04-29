@@ -1,12 +1,9 @@
-# robo-eval smoke config: Pi 0.5 × LIBERO-Infinity (smoke run)
+# roboeval smoke config: Pi 0.5 × LIBERO-Infinity (smoke run)
 #
-# Usage: robo-eval run --config configs/libero_infinity_pi05_liten_smoke.yaml
-#
-# Requires:
-#   VLA server : .venvs/pi05/bin/python -m sims.vla_policies.pi05_policy --port 5100
-#   Sim worker : MUJOCO_GL=egl .venvs/libero_infinity/bin/python sims/sim_worker.py \
-#                  --sim libero_infinity --port 5308 --headless
-#
+# Usage:
+#   roboeval serve --vla pi05 --sim libero_infinity --headless &
+#   roboeval run -c configs/libero_infinity_pi05_liten_smoke.yaml
+
 # LIBERO-Infinity is the Scenic-driven open-ended perturbation extension of
 # LIBERO. Suites are named libero_infinity_<base> and reuse LIBERO's 7-dim
 # pd_ee_delta_pose action contract; Pi 0.5 drives it natively.

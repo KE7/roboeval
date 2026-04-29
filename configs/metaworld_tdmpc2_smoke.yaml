@@ -1,17 +1,9 @@
-# robo-eval smoke config: TDMPC2 × Meta-World button-press-v2 (1 episode)
+# roboeval smoke config: TDMPC2 × Meta-World button-press-v2 (1 episode)
 #
 # Usage:
-#   robo-eval run --config configs/metaworld_tdmpc2_smoke.yaml
-#
-# Requires:
-#   VLA server (TDMPC2, 4-dim Sawyer eef-delta):
-#     .venvs/tdmpc2/bin/python -m sims.vla_policies.tdmpc2_policy --port 5109
-#
-#   Sim worker (Meta-World, 4-dim eef-delta):
-#     MUJOCO_GL=egl \
-#     .venvs/metaworld/bin/python sims/sim_worker.py \
-#       --sim metaworld --port 5305 --headless
-#
+#   roboeval serve --vla tdmpc2 --sim metaworld --headless &
+#   roboeval run -c configs/metaworld_tdmpc2_smoke.yaml
+
 # ──────────────────────────────────────────────────────────────────────────
 # ACTION-DIM EXACT MATCH (UNBLOCKS METAWORLD)
 # ──────────────────────────────────────────────────────────────────────────

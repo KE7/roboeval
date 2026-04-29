@@ -1,12 +1,9 @@
-# robo-eval smoke config (LITEN): OpenVLA × libero_spatial (1 episode, 1 task)
+# roboeval smoke config (LITEN): OpenVLA × libero_spatial (1 episode, 1 task)
 #
-# Usage: robo-eval run --config configs/libero_spatial_openvla_liten_smoke.yaml
-#
-# Requires:
-#   VLA server : .venvs/openvla/bin/python -m sims.vla_policies.openvla_policy --port 5101
-#   Sim worker : MUJOCO_GL=egl .venvs/libero/bin/python sims/sim_worker.py \
-#                  --sim libero --port 5300 --headless
-#
+# Usage:
+#   roboeval serve --vla openvla --sim libero --headless &
+#   roboeval run -c configs/libero_spatial_openvla_liten_smoke.yaml
+
 # LITEN mode smoke check.
 
 name: libero_spatial_openvla_liten_smoke
@@ -38,5 +35,5 @@ eval_python: ""
 # Output
 output_dir: results/libero_spatial_openvla_liten_smoke
 
-# Extra params passed to run_sim_eval.py (key -> value)
+# Extra params passed to roboeval.run_sim_eval (key -> value)
 params: {}
