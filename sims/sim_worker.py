@@ -28,6 +28,7 @@ import os
 import pathlib
 import signal
 import traceback
+from abc import ABC, abstractmethod
 from io import BytesIO
 from typing import Optional
 
@@ -89,22 +90,130 @@ def _build_images_response(
 
 
 # ======================================================================
-# Simulator-specific backends
-#
-# To add a new backend:
-# 1. Create a class with methods: init(), reset(), step(), get_obs(),
-#    check_success(), close(). See docs/adding_a_benchmark.md for details.
-# 2. Return conventions: reset() -> (image, image2), step() -> (image,
-#    image2, reward, done, info), get_obs() -> (image, image2).
-#    image2 is None if no wrist camera.
-# 3. Optional richer observation helpers can be exposed via backend methods
-#    such as get_state_dict() or _extract_secondary_image(); the HTTP layer
-#    forwards these fields when present without changing the base contract.
-# 3. Register your class in the BACKENDS dict at the end of this section.
+# Abstract base class for all simulator backends
 # ======================================================================
 
 
-class LiberoBackend:
+class SimBackendBase(ABC):
+    """Abstract base class for all robo-eval simulator backends.
+
+    Mirrors :class:`sims.vla_policies.base.VLAPolicyBase` on the VLA side.
+    Every new sim backend **must** subclass this class and implement all
+    abstract methods.  The ``BACKENDS`` dict at module level serves as the
+    name→class registry; ``SimBackendBase`` provides the type contract.
+
+    Lifecycle per episode::
+
+        backend = BACKENDS["libero"]()
+        backend.init(task_name, camera_resolution, suite, headless)
+        image, image2 = backend.reset(episode_index=0)
+        while not done:
+            image, image2, reward, done, info = backend.step(action)
+        backend.close()
+
+    Required abstract methods
+    -------------------------
+    ``init``           — load the simulator, resolve task, fetch init states.
+    ``reset``          — reset to a known init state; return initial image pair.
+    ``step``           — apply one action; return (image, image2, reward, done, info).
+    ``get_obs``        — return current (image, image2) without stepping.
+    ``check_success``  — return whether the current task has been solved.
+    ``close``          — teardown (free env, GPU memory, etc.).
+    ``get_info``       — return the ``/info`` metadata dict including typed
+                         ``action_spec`` / ``observation_spec`` blocks.
+    """
+
+    @abstractmethod
+    def init(
+        self,
+        task_name: str,
+        camera_resolution: int,
+        suite: Optional[str] = None,
+        headless: bool = True,
+        sim_config: Optional[dict] = None,
+    ) -> dict:
+        """Initialize the simulator for a given task.
+
+        Must set up the environment so that :meth:`reset` can be called
+        immediately afterwards.
+
+        Returns
+        -------
+        dict
+            At minimum ``{"task_description": str}``.
+        """
+
+    @abstractmethod
+    def reset(self, episode_index: Optional[int] = None):
+        """Reset to a known init state.
+
+        Parameters
+        ----------
+        episode_index:
+            Which init state to use.  ``None`` uses an auto-incrementing counter.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray | None]
+            ``(primary_image, wrist_image)`` — wrist image may be ``None``.
+        """
+
+    @abstractmethod
+    def step(self, action):
+        """Apply one action and advance the simulation by one step.
+
+        Returns
+        -------
+        tuple
+            ``(primary_image, wrist_image, reward, done, info)``
+        """
+
+    @abstractmethod
+    def get_obs(self):
+        """Return the current observation without stepping.
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray | None]
+            ``(primary_image, wrist_image)``
+        """
+
+    @abstractmethod
+    def check_success(self) -> bool:
+        """Return whether the current task has been solved."""
+
+    @abstractmethod
+    def close(self) -> None:
+        """Teardown — free the environment, GPU memory, open files, etc."""
+
+    @abstractmethod
+    def get_info(self) -> dict:
+        """Return the ``/info`` metadata dict.
+
+        Must include at minimum:
+        - ``"action_space"`` — legacy action space descriptor.
+        - ``"action_spec"`` — typed :class:`robo_eval.specs.ActionObsSpec`
+          dicts (serialized via ``ActionObsSpec.to_dict()``).
+        - ``"observation_spec"`` — same format for observations.
+        """
+
+
+# ======================================================================
+# Simulator-specific backends
+#
+# To add a new backend:
+# 1. Subclass SimBackendBase and implement all abstract methods.
+#    See docs/adding_a_benchmark.md and docs/extending.md for details.
+# 2. Return conventions: reset() -> (image, image2), step() -> (image,
+#    image2, reward, done, info), get_obs() -> (image, image2).
+#    image2 is None if no wrist camera.
+# 3. Declare typed ActionObsSpec contracts in get_info() under
+#    "action_spec" and "observation_spec" keys.
+# 4. Register your class in the BACKENDS dict at the end of this section.
+# ======================================================================
+
+
+class LiberoBackend(SimBackendBase):
     """Backend for LIBERO benchmark environments."""
 
     def __init__(self):
@@ -112,7 +221,7 @@ class LiberoBackend:
         self.benchmark = None
         self.task = None
         self._ep_idx = 0       # tracks which init_state to use per episode
-        self._last_obs: dict = {}  # cache for state extraction (Bug 2)
+        self._last_obs: dict = {}  # cache for state extraction
         self._last_img2 = None   # cache for wrist-camera image (image2)
 
     def _find_task_idx(self, task_name, task_names, suite):
@@ -132,7 +241,17 @@ class LiberoBackend:
 
     def _get_init_states(self, task_idx):
         """Load episode init states for a task. Subclasses may override."""
-        return self.benchmark.get_task_init_states(task_idx)
+        import os
+        import torch
+        from libero.libero import get_libero_path
+        init_states_path = os.path.join(
+            get_libero_path("init_states"),
+            self.benchmark.tasks[task_idx].problem_folder,
+            self.benchmark.tasks[task_idx].init_states_file,
+        )
+        # weights_only=False required for legacy LIBERO .pruned_init files which
+        # contain numpy arrays (torch.load default changed to True in PyTorch 2.6+).
+        return torch.load(init_states_path, weights_only=False)
 
     def init(self, task_name: str, camera_resolution: int, suite: str = None, headless: bool = True, sim_config: dict = None):
         """Initialize a LIBERO environment for a specific task.
@@ -245,18 +364,42 @@ class LiberoBackend:
                     {"key": "robot0_eye_in_hand_image", "resolution": [cam_res, cam_res], "role": "wrist"},
                 ],
                 "state": {"dim": 8, "format": "eef_pos(3)+axisangle(3)+gripper_qpos(2)"},
+                "image_transform": "applied_in_sim",
             },
             "max_steps": 280,
             "delta_actions": getattr(self, "delta_actions", False),
+            # Typed ActionObsSpec contracts — what this sim CONSUMES (action) and PROVIDES (obs).
+            # Serialized as plain dicts (ActionObsSpec.to_dict() format) so no robo_eval import
+            # is required in the sim venv (Python 3.8).
+            "action_spec": {
+                "position": {"name": "position", "dims": 3, "format": "delta_xyz", "range": [-1, 1],
+                             "accepts": ["delta_xyz", "delta_axisangle"]},
+                "rotation": {"name": "rotation", "dims": 3, "format": "delta_axisangle",
+                             "range": [-3.15, 3.15],
+                             "accepts": ["delta_axisangle", "axis_angle"]},
+                "gripper": {"name": "gripper", "dims": 1, "format": "binary_close_negative",
+                            "range": [-1, 1],
+                            "accepts": ["binary_close_positive", "binary_close_negative"]},
+            },
+            "observation_spec": {
+                "primary": {"name": "image", "dims": 0, "format": "rgb_hwc_uint8"},
+                "wrist":   {"name": "image", "dims": 0, "format": "rgb_hwc_uint8"},
+                "state":   {"name": "state", "dims": 8, "format": "libero_eef_pos3_aa3_grip2"},
+                "instruction": {"name": "language", "dims": 0, "format": "language"},
+            },
         }
 
     def _extract_image(self, obs):
         """Return (image, image2) where image=agentview and image2=wrist camera.
 
-        Returns raw images without any transforms.  Image flipping (e.g. the
-        180° flip required by lerobot-trained VLAs) is now applied by the
-        orchestration layer (env_wrapper) based on the VLA's declared
-        ``obs_requirements.image_transform``.
+        Both images are flipped 180° (``[::-1, ::-1]``) to match the orientation
+        expected by lerobot-trained VLAs (pi05, smolvla, openvla).  The flip is
+        applied here — in the sim layer — which is the canonical single location
+        for this transform.
+
+        Consumers (env_wrapper, policy servers) must NOT apply an additional flip.
+        The obs_space metadata from ``get_info()`` advertises
+        ``image_transform="applied_in_sim"`` to signal this.
         """
         image = obs.get("agentview_image")
         image2 = obs.get("robot0_eye_in_hand_image")
@@ -266,8 +409,8 @@ class LiberoBackend:
             )
         # Use agentview as primary if available, else wrist camera
         primary = image if image is not None else image2
-        return np.asarray(primary, dtype=np.uint8).copy(), (
-            np.asarray(image2, dtype=np.uint8).copy() if image2 is not None else None
+        return np.asarray(primary, dtype=np.uint8).copy()[::-1, ::-1], (
+            np.asarray(image2, dtype=np.uint8).copy()[::-1, ::-1] if image2 is not None else None
         )
 
     def _extract_state(self, obs: dict) -> list:
@@ -292,6 +435,42 @@ class LiberoBackend:
         state = np.concatenate([eef_pos, axisangle, gripper])  # (8,)
         return state.tolist()
 
+    def get_state_dict(self) -> dict:
+        """Return structured state dict for GR00T libero_sim embodiment tag.
+
+        Maps the LIBERO proprioceptive state to the per-key format expected by
+        the GR00T ``libero_sim`` modality config (each key is a 1-element list):
+
+            x, y, z       — EEF position (eef_pos)
+            roll, pitch, yaw — EEF orientation as axis-angle
+            gripper       — mean of gripper_qpos (scalar, range ~[0, 1])
+        """
+        obs = self._last_obs
+        if not obs:
+            return {}
+        eef_pos = np.asarray(obs.get("robot0_eef_pos", [0.0, 0.0, 0.0]), dtype=np.float32)
+        eef_quat = np.asarray(obs.get("robot0_eef_quat", [0.0, 0.0, 0.0, 1.0]), dtype=np.float32)
+        gripper = np.asarray(obs.get("robot0_gripper_qpos", [0.0, 0.0]), dtype=np.float32)
+
+        # Quaternion [x,y,z,w] → axis-angle (matches _extract_state and training data)
+        x, y, z, w = float(eef_quat[0]), float(eef_quat[1]), float(eef_quat[2]), float(eef_quat[3])
+        den = np.sqrt(max(0.0, 1.0 - w * w))
+        if den > 1e-10:
+            angle = 2.0 * np.arccos(np.clip(w, -1.0, 1.0))
+            axisangle = np.array([x, y, z], dtype=np.float32) / den * angle
+        else:
+            axisangle = np.zeros(3, dtype=np.float32)
+
+        return {
+            "x":       [float(eef_pos[0])],
+            "y":       [float(eef_pos[1])],
+            "z":       [float(eef_pos[2])],
+            "roll":    [float(axisangle[0])],
+            "pitch":   [float(axisangle[1])],
+            "yaw":     [float(axisangle[2])],
+            "gripper": [float(gripper[0]), float(gripper[1])],
+        }
+
 
 class LiberoProBackend(LiberoBackend):
     """Backend for LIBERO-Pro (same API as LIBERO, different repo).
@@ -301,13 +480,40 @@ class LiberoProBackend(LiberoBackend):
     All other methods (reset, step, get_obs, etc.) are inherited.
     """
 
-    # Default suite for LIBERO-Pro (overrides LiberoBackend's "libero_spatial")
-    DEFAULT_SUITE = "libero_pro"
+    # Default LIBERO benchmark suite used when no suite is specified.
+    # "libero_pro" is the sim backend name, not a LIBERO benchmark key.
+    DEFAULT_SUITE = "libero_spatial"
+
+    # Map caller-facing suite names → registered LIBERO benchmark keys.
+    # "libero_pro" and "libero_pro_*" are robo-eval identifiers, not keys
+    # in libero.libero.benchmark.BENCHMARK_MAPPING.
+    _SUITE_ALIASES: dict = {
+        "libero_pro": "libero_spatial",
+        "libero_pro_spatial_object": "libero_spatial",
+        "libero_pro_spatial_with_mug": "libero_spatial",
+        "libero_pro_goal_swap": "libero_goal",
+    }
 
     def _get_init_states(self, task_idx):
-        """Load init states, gracefully handling missing files."""
+        """Load init states directly with weights_only=False, gracefully handling missing files.
+
+        Uses torch.load() directly (like LiberoBackend) rather than calling
+        benchmark.get_task_init_states() which omits weights_only=False and
+        would fail on PyTorch >= 2.6 with legacy .pruned_init files containing
+        numpy arrays.  Returns an empty list when the file is absent (common
+        for LIBERO-Pro OOD variants that don't ship init states).
+        """
+        import torch
+        from libero.libero import get_libero_path
+        init_states_path = os.path.join(
+            get_libero_path("init_states"),
+            self.benchmark.tasks[task_idx].problem_folder,
+            self.benchmark.tasks[task_idx].init_states_file,
+        )
         try:
-            return self.benchmark.get_task_init_states(task_idx)
+            # weights_only=False is required for legacy LIBERO .pruned_init files
+            # which contain numpy arrays (torch.load default changed in PyTorch 2.6+).
+            return torch.load(init_states_path, weights_only=False)
         except FileNotFoundError as e:
             logger.warning("Init states not found (%s); "
                           "episodes will start from default MuJoCo state.", e)
@@ -316,19 +522,24 @@ class LiberoProBackend(LiberoBackend):
     def init(self, task_name: str, camera_resolution: int, suite: str = None, headless: bool = True, sim_config: dict = None):
         """Initialize a LIBERO-Pro environment.
 
-        Delegates to LiberoBackend.init() with a different default suite.
-        Gracefully handles missing init-state files by returning an empty list.
+        Resolves the suite name (mapping robo-eval aliases like "libero_pro"
+        to the registered LIBERO benchmark key), then delegates to
+        LiberoBackend.init().  Gracefully handles missing init-state files.
         """
+        resolved = suite or self.DEFAULT_SUITE
+        # Normalise robo-eval suite identifiers to LIBERO benchmark keys.
+        # E.g. "libero_pro" (the sim-backend name) → "libero_spatial".
+        resolved = self._SUITE_ALIASES.get(resolved, resolved)
         return super().init(
             task_name=task_name,
             camera_resolution=camera_resolution,
-            suite=suite or self.DEFAULT_SUITE,
+            suite=resolved,
             headless=headless,
             sim_config=sim_config,
         )
 
 
-class RoboCasaBackend:
+class RoboCasaBackend(SimBackendBase):
     """Backend for RoboCasa kitchen task environments.
 
     Defaults to PandaOmron (12-dim: 7 arm + 5 base) — required by RoboCasa
@@ -336,18 +547,17 @@ class RoboCasaBackend:
     configurable via ``sim_config={"robot": "PandaOmron"}``.  Panda (fixed
     base) is NOT supported by RoboCasa kitchen scenes.
 
-    Environment creation follows the Cosmos-Policy evaluation pattern:
-    controller configs loaded from a fixed pickle, proper camera setup,
-    obj_instance_split="B" (held-out test objects), and deterministic
-    layout/style IDs for reproducibility.
+    Environment creation uses fixed controller configs, explicit camera setup,
+    held-out test objects, and deterministic layout/style IDs for
+    reproducibility.
 
-    When a 7-dim policy (e.g. Cosmos) sends actions, :meth:`step` pads
+    When a 7-dim policy sends actions, :meth:`step` pads
     them to 12-dim with an idle mobile base.
 
     Returns ``(image, image2)`` where image2 is the wrist camera.
     """
 
-    # Task name aliases: Cosmos (short) → RoboCasa (full) naming convention.
+    # Task name aliases: short names → full RoboCasa environment names.
     # Callers may pass either form; both are accepted.
     _TASK_ALIASES = {
         "PnPCounterToCab": "PickPlaceCounterToCabinet",
@@ -364,7 +574,7 @@ class RoboCasaBackend:
     }
 
     # Ordered task list for numeric index mapping (runner passes --task 0, 1, ...).
-    # First 10 match the Cosmos-Policy "RoboCasa-10" benchmark.
+    # First 10 cover the common RoboCasa-10 task set.
     _TASK_INDEX = [
         "PickPlaceCounterToCabinet", "PickPlaceCabinetToCounter",
         "PickPlaceCounterToSink", "PickPlaceSinkToCounter",
@@ -379,7 +589,7 @@ class RoboCasaBackend:
         "TurnOnMicrowave", "TurnOffMicrowave",
     ]
 
-    # Max steps per task (from Cosmos evaluation benchmarks)
+    # Max steps per task.
     _TASK_MAX_STEPS = {
         "PickPlaceCounterToCabinet": 500, "PickPlaceCabinetToCounter": 500,
         "PickPlaceCounterToSink": 700, "PickPlaceSinkToCounter": 500,
@@ -394,17 +604,17 @@ class RoboCasaBackend:
         "TurnOnMicrowave": 500, "TurnOffMicrowave": 500,
     }
 
-    # Default layout and style IDs — 5 test scenes from Cosmos eval
+    # Default layout and style IDs for reproducible test scenes.
     _DEFAULT_LAYOUT_STYLE_IDS = ((1, 1), (2, 2), (4, 4), (6, 9), (7, 10))
 
-    # Camera setup matching Cosmos evaluation
+    # Camera setup used for RoboCasa evaluation.
     _CAMERA_NAMES = ["robot0_agentview_left", "robot0_agentview_right", "robot0_eye_in_hand"]
 
     # Mobile-base padding: 5 zeros + brake flag (used when receiving 7D
     # actions but running PandaOmron/PandaMobile with 12D action space)
     _MOBILE_BASE_PAD = np.array([0.0, 0.0, 0.0, 0.0, -1.0])
 
-    # Path to controller configs pickle (copied from Cosmos-Policy repo)
+    # Path to controller configs pickle.
     _CONTROLLER_CONFIGS_PATH = os.path.join(
         os.path.dirname(__file__), "robocasa_controller_configs.pkl"
     )
@@ -420,8 +630,8 @@ class RoboCasaBackend:
     def _resolve_task_name(self, task_name: str) -> str:
         """Resolve task identifiers to full RoboCasa env names.
 
-        Accepts numeric indices (e.g. "0" -> first task), Cosmos short
-        names (e.g. "PnPCounterToCab"), or full RoboCasa names.
+        Accepts numeric indices (e.g. "0" -> first task), short aliases
+        (e.g. "PnPCounterToCab"), or full RoboCasa names.
         """
         # Handle numeric task indices (runner passes --task 0, 1, ...)
         if task_name.isdigit():
@@ -435,7 +645,7 @@ class RoboCasaBackend:
         return self._TASK_ALIASES.get(task_name, task_name)
 
     def _load_controller_configs(self):
-        """Load OSC_POSE controller configs from the Cosmos pickle."""
+        """Load OSC_POSE controller configs."""
         import pickle
         with open(self._CONTROLLER_CONFIGS_PATH, "rb") as f:
             return pickle.load(f)
@@ -444,7 +654,7 @@ class RoboCasaBackend:
         """Initialize a RoboCasa environment by task name.
 
         Args:
-            task_name: Task name — accepts both Cosmos short names
+            task_name: Task name — accepts both short aliases
                 (e.g. ``PnPCounterToCab``) and full RoboCasa names
                 (e.g. ``PickPlaceCounterToCabinet``).  Defaults to
                 ``PnPCounterToCab`` when called without a task.
@@ -455,8 +665,7 @@ class RoboCasaBackend:
                 - ``robot``: ``"PandaOmron"`` (12D, default) or
                   ``"PandaMobile"`` (12D alias).  Panda (fixed base)
                   is NOT supported by RoboCasa kitchen scenes.
-                - ``obj_instance_split``: Object split (default ``"target"``,
-                  equivalent to Cosmos "B" = held-out test objects).
+                - ``obj_instance_split``: Object split (default ``"target"``).
                 - ``layout_and_style_ids``: Tuple of (layout, style) pairs.
                 - ``seed``: Random seed for environment.
         """
@@ -469,7 +678,7 @@ class RoboCasaBackend:
         self._task_name = task_name or "PnPCounterToCab"
         self._resolved_task = self._resolve_task_name(self._task_name)
 
-        # Load fixed OSC_POSE controller configs (matches Cosmos eval)
+        # Load fixed OSC_POSE controller configs.
         controller_configs = self._load_controller_configs()
 
         # Parse layout and style IDs
@@ -477,8 +686,8 @@ class RoboCasaBackend:
             "layout_and_style_ids", self._DEFAULT_LAYOUT_STYLE_IDS
         )
 
-        # Create environment using robosuite.make() directly (matches Cosmos
-        # evaluation pattern) with full kwargs for reproducible evals.
+        # Create environment using robosuite.make() directly with full kwargs
+        # for reproducible evaluation.
         env_kwargs = dict(
             env_name=self._resolved_task,
             robots=self._robot_type,
@@ -493,9 +702,14 @@ class RoboCasaBackend:
             use_camera_obs=True,
             camera_depths=False,
             seed=cfg.get("seed", None),
-            # Cosmos uses "B" (held-out test objects); our robocasa version
-            # uses "target" for the equivalent split.
+            # Use the held-out object split by default.
             obj_instance_split=cfg.get("obj_instance_split", "target"),
+            # Limit to lightwheel objects only; the lightweight asset set
+            # suffices for evaluation.  Passing objaverse would cause a
+            # NaN-probability crash when the objaverse asset dir is missing.
+            obj_registries=tuple(
+                cfg.get("obj_registries", ["lightwheel"])
+            ),
             generative_textures=None,
             randomize_cameras=cfg.get("randomize_cameras", False),
             layout_and_style_ids=layout_and_style_ids,
@@ -504,7 +718,7 @@ class RoboCasaBackend:
         self.env = robosuite.make(**env_kwargs)
 
         # Auto-reset so that /obs works immediately after /init, and run
-        # stabilization steps (matching Cosmos eval warmup pattern).
+        # stabilization steps.
         obs = self.env.reset()
         _NUM_WARMUP = 10
         dummy = np.zeros(self.env.action_spec[0].shape)
@@ -524,7 +738,7 @@ class RoboCasaBackend:
         ``episode_index`` is accepted but ignored (RoboCasa has no init states).
         """
         obs = self.env.reset()
-        # Warmup: let objects settle (matches Cosmos eval pattern)
+        # Warmup: let objects settle.
         _NUM_WARMUP = 10
         dummy = np.zeros(self.env.action_spec[0].shape)
         for _ in range(_NUM_WARMUP):
@@ -654,9 +868,39 @@ class RoboCasaBackend:
                     {"key": "robot0_eye_in_hand_image", "resolution": [cam_res, cam_res], "role": "wrist"},
                 ],
                 "state": {"dim": 9, "format": "gripper_qpos(2)+eef_pos(3)+eef_quat(4)"},
+                # RoboCasa images are passed through unchanged.
+                "image_transform": "none",
             },
             "max_steps": max_steps,
             "delta_actions": True,
+            # ── Typed ActionObsSpec contracts ───────────────────────────────────────
+            # IMPORTANT: RoboCasa state is a *9-dim quaternion* representation
+            # (gripper_qpos(2) + eef_pos(3) + eef_quat(4)).  This is structurally
+            # incompatible with the 8-dim axis-angle state that LIBERO-trained
+            # VLAs (pi05, smolvla, openvla) expect.  By declaring the spec
+            # honestly here, the orchestrator's ActionObsSpec gate refuses to start an
+            # episode for incompatible (model, sim) pairs instead of silently
+            # serving a wrong-shaped state vector.
+            "action_spec": {
+                "position": {"name": "position", "dims": 3, "format": "delta_xyz", "range": [-1, 1],
+                             "accepts": ["delta_xyz"]},
+                "rotation": {"name": "rotation", "dims": 3, "format": "delta_axisangle",
+                             "range": [-3.15, 3.15],
+                             "accepts": ["delta_axisangle", "axis_angle"]},
+                "gripper": {"name": "gripper", "dims": 1, "format": "binary_close_negative",
+                            "range": [-1, 1],
+                            "accepts": ["binary_close_positive", "binary_close_negative"]},
+            },
+            "observation_spec": {
+                "primary":   {"name": "image", "dims": 0, "format": "rgb_hwc_uint8"},
+                "secondary": {"name": "image", "dims": 0, "format": "rgb_hwc_uint8"},
+                "wrist":     {"name": "image", "dims": 0, "format": "rgb_hwc_uint8"},
+                # 9-dim quaternion state — declared explicitly so ActionObsSpec
+                # validation flags any 8-dim axis-angle consumer at episode start.
+                "state":     {"name": "state", "dims": 9,
+                              "format": "robocasa_grip2_eef_pos3_quat4"},
+                "instruction": {"name": "language", "dims": 0, "format": "language"},
+            },
         }
 
     def _extract_primary_image(self, obs):
@@ -689,16 +933,152 @@ class RoboCasaBackend:
         return None
 
 
-class RoboTwinBackend:
+# ---------------------------------------------------------------------------
+# RoboTwin fast-init helpers
+# ---------------------------------------------------------------------------
+
+class _EvalGripperPlanner:
+    """Minimal gripper planner shim for eval-only RoboTwin startup.
+
+    RoboTwin's qpos evaluation path calls ``plan_grippers()`` during env
+    setup, but never uses CuRobo path planning afterwards.  This shim
+    satisfies the gripper interpolation contract while skipping the expensive
+    CuRobo warmup triggered by ``Robot.set_planner()``.
+    """
+
+    def plan_grippers(self, now_val: float, target_val: float):
+        num_step = 200
+        per_step = (target_val - now_val) / num_step
+        vals = np.linspace(now_val, target_val, num_step)
+        return {"num_step": num_step, "per_step": per_step, "result": vals}
+
+    def update_point_cloud(self, world_pcd, resolution: float = 0.02):
+        return None
+
+    def plan_path(self, *args, **kwargs):
+        raise RuntimeError(
+            "RoboTwin eval fast-path: CuRobo path planning is disabled. "
+            "This error means a task script tried to use the full motion planner "
+            "during an eval episode — unexpected for qpos evaluation."
+        )
+
+    def plan_batch(self, *args, **kwargs):
+        raise RuntimeError(
+            "RoboTwin eval fast-path: CuRobo batch planning is disabled."
+        )
+
+
+def _make_fast_set_planner(robot_mod):
+    """Return a ``Robot.set_planner`` replacement that skips CuRobo init.
+
+    When ``robot.need_topp`` is True, instantiates the real
+    ``robot_mod.MplibPlanner`` (mplib==0.2.1, with the ``or collide`` patch
+    applied during environment setup) so that ``TOPP()`` performs genuine time-optimal
+    path parameterisation (velocity/accel limits).
+
+    CuRobo warmup in ``Robot.set_planner()`` is bypassed here
+    by not calling ``super().set_planner()``; gripper planning is handled by
+    ``_EvalGripperPlanner``.
+    """
+    def _set_planner_fast(self, scene=None):
+        self.communication_flag = False
+        self.left_planner  = _EvalGripperPlanner()
+        self.right_planner = _EvalGripperPlanner()
+
+        if getattr(self, "need_topp", False):
+            # Instantiate the real mplib.MplibPlanner so that TOPP() runs
+            # genuine time-optimal path parameterisation (velocity/accel limits).
+            # Requires mplib==0.2.1 with the collision-check patch applied.
+            self.left_mplib_planner = robot_mod.MplibPlanner(
+                self.left_urdf_path,
+                self.left_srdf_path,
+                self.left_move_group,
+                self.left_entity_origion_pose,
+                self.left_entity,
+                self.left_planner_type,
+                scene,
+            )
+            self.right_mplib_planner = robot_mod.MplibPlanner(
+                self.right_urdf_path,
+                self.right_srdf_path,
+                self.right_move_group,
+                self.right_entity_origion_pose,
+                self.right_entity,
+                self.right_planner_type,
+                scene,
+            )
+
+    return _set_planner_fast
+
+
+from contextlib import contextmanager as _contextmanager
+
+
+@_contextmanager
+def _patched_robot_set_planner():
+    """Temporarily replace ``Robot.set_planner`` to skip CuRobo warmup.
+
+    RoboTwin calls ``Robot.set_planner()`` during ``setup_demo()``.  That
+    method imports and initialises CuRobo, which is not installed in this
+    venv.  The missing import causes a ``ModuleNotFoundError`` that races
+    with SAPIEN's background XCB thread and produces an unrecoverable
+    assertion failure.
+
+    This context manager monkey-patches ``Robot.set_planner`` with
+    ``_make_fast_set_planner()`` for the duration of ``setup_demo()``, then
+    restores the prior implementation.
+    """
+    import envs.robot.robot as _robot_mod
+    original = _robot_mod.Robot.set_planner
+    _robot_mod.Robot.set_planner = _make_fast_set_planner(_robot_mod)
+    try:
+        yield
+    finally:
+        _robot_mod.Robot.set_planner = original
+
+
+# ---------------------------------------------------------------------------
+
+
+class RoboTwinBackend(SimBackendBase):
     """Backend for RoboTwin 2.0 (SAPIEN-based bimanual, 14-dim actions).
 
     Uses setup_demo() / get_obs() / take_action() — NOT reset() / step().
     CRITICAL: torch must be imported before sapien in the same process.
+
+    Lifecycle divergence (vs. LiberoBackend / RoboCasaBackend)
+    ----------------------------------------------------------
+    RoboTwin's underlying env_class takes the task name at *construction* time,
+    so this backend exposes ``initialize(seed)`` (instead of a no-arg
+    ``__init__`` followed by ``init(task_name, ...)``).  The HTTP layer in
+    ``/init`` special-cases this branch.  ``init(...)`` is provided as a thin
+    compatibility wrapper so callers that follow the LIBERO lifecycle still
+    work; the sim_worker route still runs the canonical RoboTwin path.
     """
 
-    def __init__(self, task_name: str):
+    def __init__(self, task_name: str = ""):
+        # ``task_name`` is accepted at construction time (legacy RoboTwin path)
+        # but defaults to empty so a future caller can use the standard
+        # ``backend = RoboTwinBackend(); backend.init(task_name=...)`` lifecycle.
         self.task_name = task_name
         self.env = None
+
+    def init(
+        self,
+        task_name: str,
+        camera_resolution: int = 480,
+        suite: str | None = None,
+        headless: bool = True,
+        sim_config: dict | None = None,
+    ) -> dict:
+        """Compatibility shim matching the LIBERO/RoboCasa lifecycle.
+
+        Allows external callers to follow the canonical ``init(task_name, ...)``
+        contract.  Internally still delegates to ``initialize()``.
+        """
+        self.task_name = task_name
+        seed = (sim_config or {}).get("seed", 42)
+        return self.initialize(seed=seed)
 
     def initialize(self, seed: int = 42) -> dict:
         import sys
@@ -717,7 +1097,7 @@ class RoboTwinBackend:
         if robotwin_dir not in sys.path:
             sys.path.insert(0, robotwin_dir)
 
-        # S-0: Resolve integer task index → actual task module name.
+        # Resolve integer task index → actual task module name.
         # The runner passes task_name as a decimal string ("0", "1", ...).
         # RoboTwin task modules live in envs/<task_name>.py; they are NOT numbered.
         if self.task_name.isdigit():
@@ -772,10 +1152,24 @@ class RoboTwinBackend:
         module = importlib.import_module(f"envs.{self.task_name}")
         env_class = getattr(module, self.task_name)
         self.env = env_class()
-        self.env.setup_demo(now_ep_num=0, seed=seed, is_test=True, **args)
+        # Wrap setup_demo() in _patched_robot_set_planner so that
+        # Robot.set_planner() uses _EvalGripperPlanner instead of trying to
+        # import and warm-up CuRobo.  Without this, the missing curobo import
+        # causes a ModuleNotFoundError that races with SAPIEN's background XCB
+        # thread and produces an unrecoverable assertion failure:
+        #   "Assertion '!xcb_xlib_unknown_seq_number' failed."
+        with _patched_robot_set_planner():
+            self.env.setup_demo(now_ep_num=0, seed=seed, is_test=True, **args)
         self.env.set_instruction(self.task_name.replace("_", " "))
 
-        return {"status": "ok", "action_dim": 14}
+        # Return task_description so callers can use it as the instruction
+        # (without this, task_name falls back to the raw task index "0" in the
+        # policy request, which can break task-conditioned models).
+        return {
+            "status": "ok",
+            "action_dim": 14,
+            "task_description": self.task_name.replace("_", " "),
+        }
 
     def reset(self, seed: int = 42) -> dict:
         if self.env is not None:
@@ -788,8 +1182,7 @@ class RoboTwinBackend:
         head_b64 = encode_image_b64(obs["observation"]["head_camera"]["rgb"])
         # Role-keyed images dict (canonical) + camera-name keys (backward compat)
         images = {"head_camera": head_b64, "primary": head_b64}
-        # S-1: joint_action["vector"] is the current joint positions (confirmed from
-        # official InternVLA inference.py which uses this key for state).
+        # joint_action["vector"] contains the current joint positions.
         joint_pos = obs["joint_action"]["vector"]
         result: dict = {
             "images": images,
@@ -841,9 +1234,21 @@ class RoboTwinBackend:
                     {"key": "head_camera", "resolution": [480, 640], "role": "primary"},
                 ],
                 "state": {"dim": 14, "format": "joint_positions(14)"},
+                "image_transform": "none",
             },
             "max_steps": step_lim,
             "delta_actions": False,
+            # Typed ActionObsSpec contracts.  RoboTwin uses absolute joint targets
+            # (NOT delta EEF), so VLAs trained for eef_delta will fail the gate.
+            "action_spec": {
+                "joint_pos": {"name": "joint_pos", "dims": 14, "format": "absolute_joint_positions",
+                              "accepts": ["absolute_joint_positions"]},
+            },
+            "observation_spec": {
+                "primary":   {"name": "image", "dims": 0, "format": "rgb_hwc_uint8"},
+                "state":     {"name": "state", "dims": 14, "format": "joint_positions"},
+                "instruction": {"name": "language", "dims": 0, "format": "language"},
+            },
         }
 
     def check_success(self) -> bool:
@@ -858,7 +1263,7 @@ class RoboTwinBackend:
             self.env = None
 
 
-class LiberoInfinityBackend:
+class LiberoInfinityBackend(LiberoBackend):
     """Backend for LIBERO-Infinity: Scenic-based perturbation testing.
 
     Uses the lower-level LIBEROSimulator + LIBEROSimulation API so that
@@ -1143,31 +1548,6 @@ class LiberoInfinityBackend:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _extract_state(self, obs: dict) -> list:
-        """Extract proprioceptive state: eef_pos(3) + axisangle(3) + gripper(2) = 8-dim.
-
-        Mirrors LiberoBackend._extract_state() so that VLAs requiring
-        proprioceptive state work identically with both backends.
-
-        Returns a plain list[float] for direct use by the policy server.
-        """
-        eef_pos = np.asarray(obs["robot0_eef_pos"], dtype=np.float32)       # (3,)
-        eef_quat = np.asarray(obs["robot0_eef_quat"], dtype=np.float32)     # (4,) [x,y,z,w]
-        gripper = np.asarray(obs["robot0_gripper_qpos"], dtype=np.float32)  # (2,)
-
-        # Convert quaternion [x,y,z,w] to axis-angle using lerobot's _quat2axisangle
-        # formula (matches training data). Scipy as_rotvec() differs in edge-case handling.
-        x, y, z, w = float(eef_quat[0]), float(eef_quat[1]), float(eef_quat[2]), float(eef_quat[3])
-        den = np.sqrt(max(0.0, 1.0 - w * w))
-        if den > 1e-10:
-            angle = 2.0 * np.arccos(np.clip(w, -1.0, 1.0))
-            axisangle = np.array([x, y, z], dtype=np.float32) / den * angle
-        else:
-            axisangle = np.zeros(3, dtype=np.float32)
-
-        state = np.concatenate([eef_pos, axisangle, gripper])  # (8,)
-        return state.tolist()
-
     def _post_reset_settle(self) -> None:
         """Advance zero-action control steps until the sampled scene is stable."""
         if self._sim is None or self._post_reset_settle_steps <= 0:
@@ -1309,17 +1689,41 @@ class LiberoInfinityBackend:
                     {"key": "robot0_eye_in_hand_image", "resolution": [cam_res, cam_res], "role": "wrist"},
                 ],
                 "state": {"dim": 8, "format": "eef_pos(3)+axisangle(3)+gripper_qpos(2)"},
+                # The 180° flip is applied here in the sim layer (see _extract_images
+                # below), matching LiberoBackend.  This is the canonical convention
+                # consumers must not apply a second flip.
+                "image_transform": "applied_in_sim",
             },
             "max_steps": self._max_steps,
             "delta_actions": getattr(self, "delta_actions", False),
+            # Typed ActionObsSpec contracts (mirror LiberoBackend exactly so the same
+            # LIBERO-trained VLAs work identically against both backends).
+            "action_spec": {
+                "position": {"name": "position", "dims": 3, "format": "delta_xyz", "range": [-1, 1],
+                             "accepts": ["delta_xyz", "delta_axisangle"]},
+                "rotation": {"name": "rotation", "dims": 3, "format": "delta_axisangle",
+                             "range": [-3.15, 3.15],
+                             "accepts": ["delta_axisangle", "axis_angle"]},
+                "gripper": {"name": "gripper", "dims": 1, "format": "binary_close_negative",
+                            "range": [-1, 1],
+                            "accepts": ["binary_close_positive", "binary_close_negative"]},
+            },
+            "observation_spec": {
+                "primary": {"name": "image", "dims": 0, "format": "rgb_hwc_uint8"},
+                "wrist":   {"name": "image", "dims": 0, "format": "rgb_hwc_uint8"},
+                "state":   {"name": "state", "dims": 8, "format": "libero_eef_pos3_aa3_grip2"},
+                "instruction": {"name": "language", "dims": 0, "format": "language"},
+            },
         }
 
     def _extract_images(self, obs: dict):
         """Extract (agentview, wrist-camera) images from an obs dict.
 
-        Returns raw images without any transforms.  Image flipping is now
-        applied by the orchestration layer (env_wrapper) based on the VLA's
-        declared ``obs_requirements.image_transform``.
+        Both images are flipped 180° (``[::-1, ::-1]``) here in the sim layer
+        to match the orientation expected by lerobot-trained VLAs.  This is
+        identical to LiberoBackend._extract_image and is the single location
+        for the flip.  ``obs_space.image_transform`` is advertised as
+        ``"applied_in_sim"`` so callers do not apply a second flip.
 
         Returns:
             (img, img2) where img2 is None if no wrist camera in obs.
@@ -1331,9 +1735,9 @@ class LiberoInfinityBackend:
                 f"No camera image found in obs keys: {list(obs.keys())}"
             )
         primary = image if image is not None else image2
-        img = np.asarray(primary, dtype=np.uint8).copy()
+        img = np.asarray(primary, dtype=np.uint8).copy()[::-1, ::-1]
         img2 = (
-            np.asarray(image2, dtype=np.uint8).copy()
+            np.asarray(image2, dtype=np.uint8).copy()[::-1, ::-1]
             if image2 is not None
             else None
         )
@@ -1417,16 +1821,1166 @@ class LiberoInfinityBackend:
         )
 
 
+class AlohaGymBackend(SimBackendBase):
+    """Backend for ``gym-aloha`` (HuggingFace's pure-Python ALOHA bimanual sim).
+
+    gym-aloha is a uv-clean, aarch64-friendly bimanual ALOHA simulator built on
+    MuJoCo + dm_control + gymnasium.  It complements :class:`RoboTwinBackend`:
+    same 14-dim joint-position action contract (so InternVLA drives both
+    natively), but no SAPIEN, no curobo, no mplib, no conda — pure PyPI wheels.
+
+    Tasks (gymnasium ids; ``init`` accepts the trailing name or a numeric index):
+
+    * ``AlohaTransferCube-v0`` — right arm picks the cube, hands it to left arm.
+    * ``AlohaInsertion-v0``    — both arms pick socket+peg, insert mid-air.
+
+    Lifecycle mirrors :class:`LiberoBackend` (no construction-time task name,
+    standard ``init → reset → step`` flow).  ``reset`` returns ``(image, image2)``
+    where ``image`` is the ``top`` agent-view camera and ``image2`` is the
+    ``angle`` (side) view used as a stand-in for a wrist camera.
+
+    **Image orientation**: gym-aloha's dm_control cameras render in the correct
+    (upright) orientation — **no 180° flip is applied**, unlike LIBERO backends.
+    ACT and similar checkpoints were trained on lerobot's native gym-aloha data
+    which also has no flip.  The ``obs_space.image_transform`` is ``"none"``.
+    """
+
+    # Tasks are gymnasium ids registered by `gym_aloha`.  Keep this list aligned
+    # with upstream — if HF adds tasks (e.g. ALOHA-Sim2Real), append them here.
+    TASKS: list[str] = [
+        "AlohaTransferCube-v0",
+        "AlohaInsertion-v0",
+    ]
+
+    def __init__(self) -> None:
+        self.env = None
+        self._task_id: str = ""
+        self._cam_res: int = 480
+        self._last_obs = None  # None until first reset(); empty dict was falsy, breaking pre-reset /obs
+        self._last_img2 = None
+        self._last_reward: float = 0.0
+        # gym-aloha rewards saturate at 4.0 on full task completion (both
+        # TransferCube and Insertion).  ``check_success`` compares against this.
+        self._success_threshold: float = 4.0
+        self._step_count: int = 0
+        self._max_steps: int = 400
+
+    # ------------------------------------------------------------------ helpers
+    def _resolve_task(self, task_name: str) -> str:
+        """Map a user-supplied task name (or numeric index) to a gym id."""
+        # Numeric index → list lookup (matches RoboTwinBackend).
+        if task_name.isdigit():
+            idx = int(task_name)
+            if not 0 <= idx < len(self.TASKS):
+                raise ValueError(
+                    f"AlohaGym task index {idx} out of range "
+                    f"(0-{len(self.TASKS) - 1}). Available: {self.TASKS}"
+                )
+            return self.TASKS[idx]
+        # Allow short forms: "transfer_cube", "insertion", "AlohaTransferCube-v0", etc.
+        norm = task_name.lower().replace("_", "").replace("-", "")
+        for tid in self.TASKS:
+            if norm in tid.lower().replace("-", ""):
+                return tid
+        raise ValueError(
+            f"AlohaGym task '{task_name}' not recognised. "
+            f"Available: {self.TASKS}"
+        )
+
+    # ------------------------------------------------------------------- init
+    def init(
+        self,
+        task_name: str,
+        camera_resolution: int = 480,
+        suite: Optional[str] = None,
+        headless: bool = True,
+        sim_config: Optional[dict] = None,
+    ) -> dict:
+        # MuJoCo backend selection — must precede any mujoco import.
+        os.environ["MUJOCO_GL"] = "egl" if headless else "glfw"
+        self.headless = headless
+        self._cam_res = int(camera_resolution) if camera_resolution else 480
+
+        import gymnasium as gym
+        import gym_aloha  # noqa: F401  — registers the gym ids
+
+        self._task_id = self._resolve_task(task_name)
+        # ``obs_type="pixels_agent_pos"`` returns dict of camera frames + 14-dim
+        # qpos.  ``render_mode="rgb_array"`` enables headless image capture.
+        self.env = gym.make(
+            f"gym_aloha/{self._task_id}",
+            obs_type="pixels_agent_pos",
+            render_mode="rgb_array",
+        )
+        # Discover step limit from gymnasium's TimeLimit wrapper if present.
+        spec_max = getattr(self.env.spec, "max_episode_steps", None)
+        if spec_max:
+            self._max_steps = int(spec_max)
+
+        # Friendly per-task instruction string (no built-in language label).
+        instruction = {
+            "AlohaTransferCube-v0":
+                "Right arm picks up the red cube and transfers it to the left gripper.",
+            "AlohaInsertion-v0":
+                "Pick up the socket and peg with the two arms and insert them mid-air.",
+        }.get(self._task_id, self._task_id.replace("-", " "))
+
+        return {"task_description": instruction, "task_id": self._task_id}
+
+    # ------------------------------------------------------------------ reset
+    def reset(self, episode_index: Optional[int] = None):
+        seed = 42 if episode_index is None else 1000 + int(episode_index)
+        obs, _info = self.env.reset(seed=seed)
+        self._last_obs = obs
+        self._last_reward = 0.0
+        self._step_count = 0
+        return self._extract_image(obs)
+
+    # ------------------------------------------------------------------- step
+    def step(self, action):
+        action_arr = np.asarray(action, dtype=np.float32)
+        # Tolerate VLA chunks longer than 14 (e.g. InternVLA emits 32-dim).
+        if action_arr.shape[-1] > 14:
+            action_arr = action_arr[..., :14]
+        obs, reward, terminated, truncated, info = self.env.step(action_arr)
+        self._last_obs = obs
+        self._last_reward = float(reward)
+        self._step_count += 1
+        success = self._last_reward >= self._success_threshold
+        done = bool(terminated or truncated or success)
+        info = dict(info) if isinstance(info, dict) else {}
+        info["success"] = bool(success)
+        img, img2 = self._extract_image(obs)
+        return img, img2, self._last_reward, done, info
+
+    # ---------------------------------------------------------------- get_obs
+    def get_obs(self):
+        return self._extract_image(self._last_obs)
+
+    def check_success(self) -> bool:
+        return bool(self._last_reward >= self._success_threshold)
+
+    def close(self) -> None:
+        if self.env is not None:
+            try:
+                self.env.close()
+            finally:
+                self.env = None
+
+    # --------------------------------------------------------------- get_info
+    def get_info(self) -> dict:
+        cam_res = self._cam_res
+        return {
+            "action_space": {"type": "joint_pos", "dim": 14, "accepted_dims": [14, 32]},
+            "obs_space": {
+                "cameras": [
+                    {"key": "top", "resolution": [cam_res, cam_res], "role": "primary"},
+                    {"key": "angle", "resolution": [cam_res, cam_res], "role": "wrist"},
+                ],
+                "state": {"dim": 14, "format": "joint_positions(14)"},
+                # gym-aloha dm_control cameras render images in the correct (upright)
+                # orientation — no in-sim flip is applied.  VLA consumers must NOT
+                # apply an additional flip either (ACT was trained on un-flipped images).
+                "image_transform": "none",
+            },
+            "max_steps": self._max_steps,
+            "delta_actions": False,
+            # gym-aloha consumes ABSOLUTE 14-dim joint targets — the same
+            # contract as RoboTwin, so InternVLA's joint_pos head drives it.
+            "action_spec": {
+                "joint_pos": {
+                    "name": "joint_pos",
+                    "dims": 14,
+                    "format": "absolute_joint_positions",
+                    "accepts": ["absolute_joint_positions"],
+                },
+            },
+            "observation_spec": {
+                "primary":     {"name": "image",    "dims": 0, "format": "rgb_hwc_uint8"},
+                "wrist":       {"name": "image",    "dims": 0, "format": "rgb_hwc_uint8"},
+                "state":       {"name": "state",    "dims": 14, "format": "joint_positions"},
+                "instruction": {"name": "language", "dims": 0, "format": "language"},
+            },
+        }
+
+    # --------------------------------------------------------- image helpers
+    def _extract_image(self, obs):
+        """Return ``(primary, wrist)`` — in natural (un-flipped) camera orientation.
+
+        gym-aloha with ``obs_type="pixels_agent_pos"`` exposes a ``pixels`` dict
+        with a ``top`` key (overhead camera).  An ``angle`` (side) key may also
+        be present in some gym-aloha builds; if absent, ``wrist`` is ``None``.
+
+        **No 180° flip is applied here.**  gym-aloha's dm_control cameras render
+        images in the correct (upright) orientation — the same orientation used
+        when lerobot collected ACT training data.  Applying a flip (as LIBERO
+        backends do via LiberoProcessorStep) would present upside-down images to
+        ACT, causing it to produce near-random actions.
+
+        Returns a black placeholder pair when called before the first reset
+        (``obs is None``) so that ``GET /obs`` immediately after ``POST /init``
+        does not crash ``encode_image_b64``.
+        """
+        if obs is None:
+            # Pre-reset state: return black frames so /obs before /reset is safe.
+            blank = np.zeros((self._cam_res, self._cam_res, 3), dtype=np.uint8)
+            return blank, None
+        pixels = obs.get("pixels") if isinstance(obs, dict) else None
+        if pixels is None:
+            blank = np.zeros((self._cam_res, self._cam_res, 3), dtype=np.uint8)
+            return blank, None
+        top = pixels.get("top")
+        angle = pixels.get("angle")
+        if top is None and angle is None:
+            raise KeyError(
+                f"No camera image found in gym-aloha obs pixels keys: {list(pixels.keys())}"
+            )
+        primary = top if top is not None else angle
+        primary = np.asarray(primary, dtype=np.uint8).copy()
+        wrist = (
+            np.asarray(angle, dtype=np.uint8).copy()
+            if angle is not None
+            else None
+        )
+        self._last_img2 = wrist
+        return primary, wrist
+
+    def _extract_state(self, obs: dict) -> list:
+        """Return the 14-dim joint position vector ALOHA-style."""
+        if obs is None:
+            return [0.0] * 14
+        agent_pos = obs.get("agent_pos") if isinstance(obs, dict) else None
+        if agent_pos is None:
+            return [0.0] * 14
+        arr = np.asarray(agent_pos, dtype=np.float32).reshape(-1)
+        return arr.tolist()
+
+
+# === START gym_pusht ===
+# ======================================================================
+# GymPushTBackend — HuggingFace gym-pusht (PushT pushing benchmark)
+#
+# gym-pusht is the canonical companion simulator for Diffusion Policy.
+# A T-shaped block must be pushed into a target zone using a 2-dim
+# (x, y) end-effector action.  Pure Python / PyPI — no MuJoCo, no
+# conda, no GPU required.  aarch64-clean.
+#
+# Package : gym-pusht  (PyPI)
+# Python  : 3.11+
+# Action  : 2-dim continuous (x, y) normalised to [-1, 1]
+# Task    : push_t  (single task)
+# ======================================================================
+
+
+class GymPushTBackend(SimBackendBase):
+    """Backend for ``gym-pusht`` (HuggingFace's PushT pushing benchmark).
+
+    gym-pusht is a lightweight pure-Python 2-D pushing simulator built on
+    `pymunk` (2-D physics) + `pygame` (rendering).  It is the **canonical**
+    companion to Diffusion Policy; the reference DP model was trained and
+    evaluated exclusively on this environment.
+
+    **Task**: push a T-shaped block into a target zone drawn on the
+    workspace floor using a disk-shaped end-effector.
+
+    **Action space**: 2-dim ``(x, y)`` continuous, normalised to [-1, 1],
+    representing the desired end-effector position on the 2-D workspace.
+
+    **Success criterion**: T-block coverage of the target zone ≥ 90 %
+    (``env.reward() >= 0.9``).
+
+    **Install**: ``pip install gym-pusht`` (PyPI, no extras needed).
+    Python 3.11+, aarch64-clean.
+
+    Lifecycle mirrors :class:`AlohaGymBackend` (``init → reset → step``).
+    ``reset`` returns a single ``(primary, None)`` image tuple.
+    """
+
+    # Single task id registered by gym_pusht
+    TASKS: list[str] = ["gym_pusht/PushT-v0"]
+
+    def __init__(self) -> None:
+        self.env = None
+        self._task_id: str = ""
+        self._cam_res: int = 96
+        self._last_obs = None
+        self._last_reward: float = 0.0
+        # Coverage ≥ 0.9 → success (matches DP paper threshold)
+        self._success_threshold: float = 0.9
+        self._step_count: int = 0
+        self._max_steps: int = 300
+
+    # ---------------------------------------------------------------- helpers
+    def _resolve_task(self, task_name: str) -> str:
+        """Map a user-supplied task name or index to the gymnasium id."""
+        if task_name.isdigit():
+            idx = int(task_name)
+            if idx != 0:
+                raise ValueError(
+                    f"GymPushT only has task index 0 (push_t). Got {idx}."
+                )
+            return self.TASKS[0]
+        norm = task_name.lower().replace("_", "").replace("-", "").replace("/", "")
+        for tid in self.TASKS:
+            if norm in tid.lower().replace("_", "").replace("-", "").replace("/", ""):
+                return tid
+        # Accept bare "push_t" or "pusht" as aliases
+        if norm in ("pusht", "pusht", "pushtv0"):
+            return self.TASKS[0]
+        raise ValueError(
+            f"GymPushT task '{task_name}' not recognised. "
+            f"Available: {self.TASKS} or index 0."
+        )
+
+    # ------------------------------------------------------------------- init
+    def init(
+        self,
+        task_name: str,
+        camera_resolution: int = 96,
+        suite: Optional[str] = None,
+        headless: bool = True,
+        sim_config: Optional[dict] = None,
+    ) -> dict:
+        self._cam_res = int(camera_resolution) if camera_resolution else 96
+        self._task_id = self._resolve_task(task_name)
+
+        import gymnasium as gym
+        import gym_pusht  # noqa: F401  — registers gym_pusht/PushT-v0
+
+        # render_mode="rgb_array" for headless pixel observations.
+        # obs_type="pixels_agent_pos" returns dict with "pixels" and "agent_pos".
+        self.env = gym.make(
+            self._task_id,
+            obs_type="pixels_agent_pos",
+            render_mode="rgb_array",
+        )
+        spec_max = getattr(self.env.spec, "max_episode_steps", None)
+        if spec_max:
+            self._max_steps = int(spec_max)
+
+        return {
+            "task_description": (
+                "Push the T-shaped block into the target zone "
+                "using the disk end-effector."
+            ),
+            "task_id": self._task_id,
+        }
+
+    # ------------------------------------------------------------------ reset
+    def reset(self, episode_index: Optional[int] = None):
+        seed = 42 if episode_index is None else 1000 + int(episode_index)
+        obs, _info = self.env.reset(seed=seed)
+        self._last_obs = obs
+        self._last_reward = 0.0
+        self._step_count = 0
+        return self._extract_image(obs), None
+
+    # ------------------------------------------------------------------- step
+    def step(self, action):
+        action_arr = np.asarray(action, dtype=np.float32)
+        # Accept 2-dim actions; truncate longer vectors (e.g. from chunked VLAs)
+        action_arr = action_arr.reshape(-1)[:2]
+        obs, reward, terminated, truncated, info = self.env.step(action_arr)
+        self._last_obs = obs
+        self._last_reward = float(reward)
+        self._step_count += 1
+        success = self._last_reward >= self._success_threshold
+        done = bool(terminated or truncated or success)
+        info = dict(info) if isinstance(info, dict) else {}
+        info["success"] = bool(success)
+        img = self._extract_image(obs)
+        return img, None, self._last_reward, done, info
+
+    # ---------------------------------------------------------------- get_obs
+    def get_obs(self):
+        return self._extract_image(self._last_obs), None
+
+    def check_success(self) -> bool:
+        return bool(self._last_reward >= self._success_threshold)
+
+    def close(self) -> None:
+        if self.env is not None:
+            try:
+                self.env.close()
+            finally:
+                self.env = None
+
+    # --------------------------------------------------------------- get_info
+    def get_info(self) -> dict:
+        cam_res = self._cam_res
+        return {
+            "action_space": {
+                "type": "eef_xy",
+                "dim": 2,
+                "accepted_dims": [2],
+            },
+            "obs_space": {
+                "cameras": [
+                    {"key": "pixels", "resolution": [cam_res, cam_res], "role": "primary"},
+                ],
+                "state": {"dim": 2, "format": "agent_xy_position"},
+                "image_transform": "none",
+            },
+            "max_steps": self._max_steps,
+            "delta_actions": False,
+            "action_spec": {
+                "eef_xy": {
+                    "name": "eef_xy",
+                    "dims": 2,
+                    "format": "absolute_xy_position",
+                    "accepts": ["absolute_xy_position"],
+                },
+            },
+            "observation_spec": {
+                "primary":     {"name": "image",    "dims": 0, "format": "rgb_hwc_uint8"},
+                "state":       {"name": "state",    "dims": 2, "format": "agent_xy_position"},
+                "instruction": {"name": "language", "dims": 0, "format": "language"},
+            },
+        }
+
+    # ------------------------------------------------------------- image helper
+    def _extract_image(self, obs) -> np.ndarray:
+        """Return the RGB pixel observation from gym-pusht."""
+        if obs is None:
+            return np.zeros((self._cam_res, self._cam_res, 3), dtype=np.uint8)
+        if isinstance(obs, dict):
+            pixels = obs.get("pixels")
+            if pixels is not None:
+                return np.asarray(pixels, dtype=np.uint8)
+        # Fallback: render directly
+        rendered = self.env.render()
+        if rendered is not None:
+            return np.asarray(rendered, dtype=np.uint8)
+        return np.zeros((self._cam_res, self._cam_res, 3), dtype=np.uint8)
+
+    def _extract_state(self, obs) -> list:
+        """Return the 2-dim agent (x, y) position."""
+        if obs is None:
+            return [0.0, 0.0]
+        if isinstance(obs, dict):
+            agent_pos = obs.get("agent_pos")
+            if agent_pos is not None:
+                return np.asarray(agent_pos, dtype=np.float32).reshape(-1)[:2].tolist()
+        return [0.0, 0.0]
+
+
+# === END gym_pusht ===
+
+
+# === START maniskill2 ===
+# ======================================================================
+# ManiSkill2Backend — Hao Su lab manipulation benchmark (SAPIEN-based)
+#
+# aarch64 availability note
+# ──────────────────────────────────────────────────────────────────────
+# mani_skill2==0.5.3 requires sapien==2.2.2, which ships ONLY
+# manylinux2014_x86_64 wheels on PyPI.  sapien 3.x (used by mani-skill3)
+# also lacks aarch64 wheels.  The SAPIEN nightly index (used by RoboTwin)
+# does not publish sapien 2.2.2 for aarch64 either.
+#
+# On aarch64 this backend remains discoverable:
+#   - registered in BACKENDS for introspection,
+#   - get_info() returns a valid spec for tooling introspection,
+#   - init() raises RuntimeError with remediation guidance.
+#
+# x86_64 users can install the full ManiSkill2 stack.
+#
+# Package   : mani_skill2  (PyPI)
+# Python    : 3.9+
+# Renderer  : SAPIEN (requires sapien==2.2.2, x86_64 only on PyPI)
+# Action    : pd_ee_delta_pose  7-dim (6 EEF delta + 1 gripper)
+# Tasks     : PickCube-v0, StackCube-v0, PegInsertionSide-v0
+# ======================================================================
+
+
+class ManiSkill2Backend(SimBackendBase):
+    """Backend for ManiSkill2 (Hao Su lab, SAPIEN-based manipulation benchmark).
+
+    .. warning:: **aarch64 availability**
+
+        ``mani_skill2==0.5.3`` requires ``sapien==2.2.2``, which ships only
+        ``manylinux2014_x86_64`` wheels on PyPI.  ``sapien 3.x`` (used by
+        ``mani-skill3``) also lacks aarch64 wheels.  The SAPIEN nightly index
+        (used by RoboTwin) does not publish ``sapien==2.2.2`` for aarch64.
+
+        On aarch64 this backend remains introspectable: ``get_info()`` returns
+        a valid typed spec so tooling can introspect it; ``init()`` raises
+        ``RuntimeError`` with remediation guidance.
+
+        x86_64 environments can install the full ManiSkill2 stack.
+
+    Tasks (ManiSkill2 gymnasium env ids):
+
+    * ``PickCube-v0``         — pick up a cube and lift it to a target height.
+    * ``StackCube-v0``        — stack the green cube on top of the red cube.
+    * ``PegInsertionSide-v0`` — insert a peg into a side-hole box.
+
+    Action space: ``pd_ee_delta_pose`` controller — 7-dim
+    ``(Δx, Δy, Δz, Δax, Δay, Δaz, gripper)`` — compatible with pi05,
+    smolvla, and openvla single-arm checkpoints.
+
+    Camera: ``base_camera`` 256×256 RGB (primary); no wrist camera by default.
+
+    Lifecycle mirrors :class:`LiberoBackend` (``init → reset → step``).
+    """
+
+    # Canonical ManiSkill2 task ids shipped with the package.  All three share
+    # the same 7-dim pd_ee_delta_pose action space so they work with pi05 /
+    # smolvla / openvla without action-space remapping.
+    TASKS: list[str] = [
+        "PickCube-v0",
+        "StackCube-v0",
+        "PegInsertionSide-v0",
+    ]
+
+    # Human-readable task descriptions (ManiSkill2 has no built-in language labels).
+    _TASK_DESCRIPTIONS: dict[str, str] = {
+        "PickCube-v0":         "Pick up the red cube and lift it above the table.",
+        "StackCube-v0":        "Stack the green cube on top of the red cube.",
+        "PegInsertionSide-v0": "Insert the peg into the side-hole box.",
+    }
+
+    # Max episode steps for each task (ManiSkill2 defaults).
+    _TASK_MAX_STEPS: dict[str, int] = {
+        "PickCube-v0":         200,
+        "StackCube-v0":        200,
+        "PegInsertionSide-v0": 500,
+    }
+
+    def __init__(self) -> None:
+        self.env = None
+        self._task_id: str = ""
+        self._cam_res: int = 256
+        self._last_obs = None
+        self._last_reward: float = 0.0
+        self._step_count: int = 0
+        self._max_steps: int = 200
+
+    # ---------------------------------------------------------------- helpers
+
+    @staticmethod
+    def _aarch64_blocker_message() -> str:
+        """Return a descriptive RuntimeError message for aarch64 installs."""
+        return (
+            "ManiSkill2 is not available on aarch64: mani_skill2==0.5.3 requires "
+            "sapien==2.2.2, which ships only manylinux2014_x86_64 wheels on PyPI.  "
+            "sapien 3.x (mani-skill3) also lacks aarch64 wheels as of 2026-04-26.  "
+            "Options:\n"
+            "  1. Run on x86_64 and use: ./scripts/setup.sh maniskill2\n"
+            "  2. Watch https://github.com/haosulab/SAPIEN/releases for an "
+            "aarch64 wheel and re-run setup once published.\n"
+            "  3. Use gym-aloha (aloha_gym) or RoboTwin for aarch64-compatible "
+            "benchmarks in this harness."
+        )
+
+    def _resolve_task(self, task_name: str) -> str:
+        """Map a user-supplied task name or numeric index to a ManiSkill2 env id."""
+        if task_name.isdigit():
+            idx = int(task_name)
+            if not 0 <= idx < len(self.TASKS):
+                raise ValueError(
+                    f"ManiSkill2 task index {idx} out of range "
+                    f"(0-{len(self.TASKS) - 1}). Available: {self.TASKS}"
+                )
+            return self.TASKS[idx]
+        # Exact match (case-insensitive, normalised)
+        norm = task_name.lower().replace("-", "").replace("_", "")
+        for tid in self.TASKS:
+            if norm == tid.lower().replace("-", "").replace("_", ""):
+                return tid
+        # Substring match
+        matches = [t for t in self.TASKS
+                   if norm in t.lower().replace("-", "").replace("_", "")]
+        if len(matches) == 1:
+            return matches[0]
+        raise ValueError(
+            f"ManiSkill2 task '{task_name}' not recognised. "
+            f"Available: {self.TASKS} (or numeric indices 0-{len(self.TASKS)-1})"
+        )
+
+    # ------------------------------------------------------------------- init
+
+    def init(
+        self,
+        task_name: str,
+        camera_resolution: int = 256,
+        suite: Optional[str] = None,
+        headless: bool = True,
+        sim_config: Optional[dict] = None,
+    ) -> dict:
+        """Initialise ManiSkill2 for *task_name*.
+
+        .. warning::
+            Raises ``RuntimeError`` on **aarch64** — ``sapien==2.2.2`` has no
+            aarch64 wheel.  On x86_64 this performs a full ``mani_skill2``
+            import and ``gymnasium.make()`` call.
+        """
+        import platform
+        if platform.machine() == "aarch64":
+            raise RuntimeError(self._aarch64_blocker_message())
+
+        # x86_64 path — attempt real import
+        try:
+            import mani_skill2.envs  # noqa: F401  registers all task envs
+            import gymnasium as gym
+        except ImportError as exc:
+            raise RuntimeError(
+                f"mani_skill2 import failed: {exc}.  "
+                "Run: ./scripts/setup.sh maniskill2"
+            ) from exc
+
+        self._task_id = self._resolve_task(task_name)
+        self._cam_res = int(camera_resolution) if camera_resolution else 256
+        sim_config = sim_config or {}
+        self._max_steps = int(sim_config.get(
+            "max_steps", self._TASK_MAX_STEPS.get(self._task_id, 200)
+        ))
+
+        self.env = gym.make(
+            self._task_id,
+            obs_mode="rgbd",
+            control_mode="pd_ee_delta_pose",
+            render_mode="cameras",
+            camera_cfgs={"width": self._cam_res, "height": self._cam_res},
+        )
+        self._step_count = 0
+        self._last_reward = 0.0
+
+        description = self._TASK_DESCRIPTIONS.get(self._task_id, self._task_id)
+        return {"task_description": description, "task_id": self._task_id}
+
+    # ------------------------------------------------------------------ reset
+
+    def reset(self, episode_index: Optional[int] = None) -> tuple:
+        seed = 42 if episode_index is None else 1000 + int(episode_index)
+        obs, _info = self.env.reset(seed=seed)
+        self._last_obs = obs
+        self._last_reward = 0.0
+        self._step_count = 0
+        return self._extract_image(obs)
+
+    # ------------------------------------------------------------------- step
+
+    def step(self, action):
+        action_arr = np.asarray(action, dtype=np.float32)
+        if action_arr.ndim > 1:
+            action_arr = action_arr.flatten()
+        # pd_ee_delta_pose expects exactly 7 dims.
+        if action_arr.shape[0] > 7:
+            action_arr = action_arr[:7]
+        obs, reward, terminated, truncated, info = self.env.step(action_arr)
+        self._last_obs = obs
+        self._last_reward = float(reward)
+        self._step_count += 1
+        success = bool(info.get("success", False))
+        done = bool(terminated or truncated or success)
+        info = dict(info) if isinstance(info, dict) else {}
+        info["success"] = success
+        img, img2 = self._extract_image(obs)
+        return img, img2, self._last_reward, done, info
+
+    # ---------------------------------------------------------------- get_obs
+
+    def get_obs(self) -> tuple:
+        return self._extract_image(self._last_obs)
+
+    # ---------------------------------------------------------- check_success
+
+    def check_success(self) -> bool:
+        if self._last_obs is None:
+            return False
+        # ManiSkill2 reports success in info; mirror via env if available.
+        if hasattr(self.env, "get_attr"):
+            try:
+                return bool(self.env.get_attr("is_success")[0])
+            except Exception:
+                pass
+        return False
+
+    # ----------------------------------------------------------------- close
+
+    def close(self) -> None:
+        if self.env is not None:
+            try:
+                self.env.close()
+            finally:
+                self.env = None
+
+    # ---------------------------------------------------------------- get_info
+
+    def get_info(self) -> dict:
+        """Return action/observation spec.
+
+        Returns a valid spec even on aarch64 (where ``init()`` is blocked) so
+        tooling can introspect the expected contract without installing
+        ManiSkill2.
+        """
+        cam_res = self._cam_res
+        task = self._task_id or "PickCube-v0"
+        max_steps = self._TASK_MAX_STEPS.get(task, 200)
+        return {
+            "sim": "maniskill2",
+            "action_space": {
+                "type": "eef_delta",
+                "dim": 7,
+                "accepted_dims": [7],
+                "controller": "pd_ee_delta_pose",
+            },
+            "obs_space": {
+                "cameras": [
+                    {"key": "base_camera", "resolution": [cam_res, cam_res],
+                     "role": "primary"},
+                ],
+                "state": {"dim": 9, "format": "qpos(7)+qvel(2)"},
+                "image_transform": "none",
+            },
+            "max_steps": max_steps,
+            "delta_actions": True,
+            # Typed ActionObsSpec — matches the 7-dim eef_delta contract used by
+            # pi05, smolvla, and openvla so those VLAs can drive ManiSkill2
+            # without remapping (same format as LiberoBackend).
+            "action_spec": {
+                "position": {
+                    "name": "position", "dims": 3,
+                    "format": "delta_xyz", "range": [-1, 1],
+                    "accepts": ["delta_xyz"],
+                },
+                "rotation": {
+                    "name": "rotation", "dims": 3,
+                    "format": "delta_axisangle", "range": [-3.15, 3.15],
+                    "accepts": ["delta_axisangle", "axis_angle"],
+                },
+                "gripper": {
+                    "name": "gripper", "dims": 1,
+                    "format": "binary_close_negative", "range": [-1, 1],
+                    "accepts": ["binary_close_negative"],
+                },
+            },
+            "observation_spec": {
+                "primary":     {"name": "image",    "dims": 0,
+                                "format": "rgb_hwc_uint8"},
+                "state":       {"name": "state",    "dims": 9,
+                                "format": "qpos7_qvel2"},
+                "instruction": {"name": "language", "dims": 0,
+                                "format": "language"},
+            },
+            # Advertise the aarch64 blocker so callers can surface it cleanly.
+            "aarch64_blocked": True,
+            "aarch64_note": (
+                "sapien==2.2.2 (required by mani_skill2==0.5.3) has no aarch64 "
+                "wheel on PyPI.  init() raises RuntimeError on aarch64."
+            ),
+        }
+
+    # ------------------------------------------------------- image helpers
+
+    def _extract_image(self, obs) -> tuple:
+        """Extract ``(primary, None)`` from a ManiSkill2 obs dict.
+
+        ManiSkill2 obs_mode='rgbd' nests camera images under
+        ``obs["image"]["base_camera"]["rgb"]``.  Returns ``(primary, None)``
+        since there is no wrist camera in the default single-arm config.
+        """
+        if obs is None:
+            blank = np.zeros((self._cam_res, self._cam_res, 3), dtype=np.uint8)
+            return blank, None
+        try:
+            rgb = obs["image"]["base_camera"]["rgb"]
+            img = np.asarray(rgb, dtype=np.uint8).copy()
+            return img, None
+        except (KeyError, TypeError):
+            # Fallback — try flat "rgb" key
+            if isinstance(obs, dict) and "rgb" in obs:
+                img = np.asarray(obs["rgb"], dtype=np.uint8).copy()
+                return img, None
+            blank = np.zeros((self._cam_res, self._cam_res, 3), dtype=np.uint8)
+            logger.warning(
+                "ManiSkill2Backend: could not extract image from obs; "
+                "returning blank frame.  obs keys: %s",
+                list(obs.keys()) if isinstance(obs, dict) else type(obs),
+            )
+            return blank, None
+
+
+# === END maniskill2 ===
+
+
+# === START metaworld ===
+
+# Per-task natural-language descriptions used by ``MetaWorldBackend.init()``.
+_MW_TASK_DESCRIPTIONS: dict[str, str] = {
+    # Keys use V3 names (installed metaworld package is V3).
+    # V2 names (e.g. "button-press-v2") are accepted by _resolve_task() and
+    # automatically mapped to the corresponding V3 name.
+    "assembly-v3": "Insert the peg into the ring.",
+    "basketball-v3": "Dunk the basketball into the basket.",
+    "bin-picking-v3": "Pick up the object and place it in the bin.",
+    "box-close-v3": "Close the box by pushing the lid down.",
+    "button-press-topdown-v3": "Press the red button from above.",
+    "button-press-topdown-wall-v3": "Press the button from above, reaching over the wall.",
+    "button-press-v3": "Press the red button.",
+    "button-press-wall-v3": "Press the button on the other side of the wall.",
+    "coffee-button-v3": "Push the button on the coffee machine.",
+    "coffee-pull-v3": "Pull the coffee mug out of the machine.",
+    "coffee-push-v3": "Push the coffee mug into the machine.",
+    "dial-turn-v3": "Rotate the dial to the target position.",
+    "disassemble-v3": "Remove the peg from the ring.",
+    "door-close-v3": "Close the door.",
+    "door-lock-v3": "Lock the door by turning the lock clockwise.",
+    "door-open-v3": "Open the door.",
+    "door-unlock-v3": "Unlock the door by turning the lock counter-clockwise.",
+    "hand-insert-v3": "Insert the hand into the hole.",
+    "drawer-close-v3": "Close the drawer.",
+    "drawer-open-v3": "Open the drawer.",
+    "faucet-open-v3": "Turn the faucet handle to open.",
+    "faucet-close-v3": "Turn the faucet handle to close.",
+    "hammer-v3": "Hammer the nail into the board.",
+    "handle-press-side-v3": "Press the handle down from the side.",
+    "handle-press-v3": "Press the handle down.",
+    "handle-pull-side-v3": "Pull the handle up from the side.",
+    "handle-pull-v3": "Pull the handle up.",
+    "lever-pull-v3": "Pull the lever towards you.",
+    "peg-insert-side-v3": "Insert the peg into the hole from the side.",
+    "pick-place-wall-v3": "Pick up the puck and place it at the goal past the wall.",
+    "pick-out-of-hole-v3": "Pick the peg out of the hole.",
+    "reach-v3": "Move the robot hand to the red goal sphere.",
+    "push-back-v3": "Push the puck to the goal behind the robot.",
+    "push-v3": "Push the puck to the goal.",
+    "pick-place-v3": "Pick up the puck and place it at the goal.",
+    "plate-slide-v3": "Slide the plate forward to the goal.",
+    "plate-slide-side-v3": "Slide the plate sideways to the goal.",
+    "plate-slide-back-v3": "Slide the plate backwards to the goal.",
+    "plate-slide-back-side-v3": "Slide the plate diagonally back to the goal.",
+    "peg-unplug-side-v3": "Remove the peg from the socket on the side.",
+    "soccer-v3": "Kick the ball into the goal.",
+    "stick-push-v3": "Use the stick to push the puck to the goal.",
+    "stick-pull-v3": "Use the stick to pull the puck to the goal.",
+    "push-wall-v3": "Push the puck past the wall to the goal.",
+    "reach-wall-v3": "Reach to the goal past the wall.",
+    "shelf-place-v3": "Lift the puck and place it on the shelf.",
+    "sweep-into-v3": "Sweep the puck into the hole.",
+    "sweep-v3": "Sweep the puck to the goal.",
+    "window-close-v3": "Close the window.",
+    "window-open-v3": "Open the window.",
+}
+
+
+class MetaWorldBackend(SimBackendBase):
+    """Backend for the Meta-World benchmark (~50 single-arm manipulation tasks).
+
+    Meta-World provides a well-known suite of tabletop manipulation tasks
+    (push-button, pick-place, door-open, drawer-close, etc.) built on top of
+    MuJoCo and the Sawyer robot.  It is a pure PyPI / uv-clean package with
+    official aarch64-compatible wheels (MuJoCo provides aarch64 wheels; no
+    SAPIEN, no curobo, no conda).
+
+    **Action space** (4-dim end-effector delta, range [−1, 1])::
+
+        dim 0: Δx  (EEF position delta, forward/back)
+        dim 1: Δy  (EEF position delta, left/right)
+        dim 2: Δz  (EEF position delta, up/down)
+        dim 3: gripper open/close  (−1 = closed, +1 = open)
+
+    **Action-dim mismatch with 7-dim VLAs (Pi0.5, SmolVLA, OpenVLA):**
+    These VLAs emit 7-dim actions (6-DoF EEF delta + gripper).  The
+    ``action_spec`` declared by this backend has ``dims=4`` and
+    ``accepted_dims=[4]``, so the orchestrator's ``ActionObsSpec`` gate will
+    BLOCK those pairings at episode start — producing a "spec-gate-blocked"
+    verdict.  This is expected behaviour for v0.1; it proves the gate works.
+    A 4-dim adapter or a 4-dim-native VLA is required for those pairings.
+
+    The backend still implements a defensive 7→4 truncation inside ``step()``
+    (keeps dims 0-2 for xyz and dim 6 for gripper) so isolated unit tests can
+    drive the env with a 7-dim action without crashing.
+
+    **Cameras:** ``corner`` (primary agent view) and ``behindGripper`` (wrist
+    stand-in).  Both are flipped 180° (``[::-1, ::-1]``) inside
+    ``_get_images()`` to match the in-sim flip convention used by every other
+    backend.
+
+    **Python:** 3.11.
+
+    Lifecycle mirrors :class:`LiberoBackend` and :class:`AlohaGymBackend`:
+    no construction-time task name; standard ``init → reset → step`` flow.
+    """
+
+    #: Canonical MT50 task names aligned with ``metaworld.MT50.train_classes``.
+    TASKS: list[str] = sorted(_MW_TASK_DESCRIPTIONS.keys())
+
+    def __init__(self) -> None:
+        self.env = None
+        self._task_name: str = ""
+        self._cam_res: int = 256
+        self._last_obs = None
+        self._last_reward: float = 0.0
+        self._last_success: bool = False
+        self._step_count: int = 0
+        self._max_steps: int = 500
+        # Persistent MuJoCo renderers reused across calls to avoid the
+        # overhead of re-creating them on every step() / get_obs().
+        self._mj_renderer = None
+        self._mj_renderer_wrist = None
+        # Task-variation objects (list[metaworld.Task]); populated in init().
+        self._tasks: list = []
+
+    # ----------------------------------------------------------------- helpers
+
+    def _resolve_task(self, task_name: str) -> str:
+        """Map a user-supplied task name or integer index to a canonical MT50 name.
+
+        Accepts V3 names (canonical), V2 names (automatically promoted to V3),
+        integer indices, or unambiguous substrings.
+        """
+        if task_name.isdigit():
+            idx = int(task_name)
+            if not 0 <= idx < len(self.TASKS):
+                raise ValueError(
+                    f"MetaWorld task index {idx} out of range "
+                    f"(0-{len(self.TASKS) - 1}).  Available: {self.TASKS}"
+                )
+            return self.TASKS[idx]
+        if task_name in self.TASKS:
+            return task_name
+        # V2 → V3 automatic promotion: "button-press-v2" → "button-press-v3".
+        if task_name.endswith("-v2"):
+            v3_name = task_name[:-3] + "-v3"
+            if v3_name in self.TASKS:
+                return v3_name
+        # Fuzzy: normalise underscores to dashes and try substring match.
+        norm = task_name.lower().replace("_", "-")
+        matches = [t for t in self.TASKS if norm in t.lower()]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(
+                f"MetaWorld task '{task_name}' is ambiguous — matches {matches}."
+            )
+        raise ValueError(
+            f"MetaWorld task '{task_name}' not recognised.  "
+            f"Available ({len(self.TASKS)}): {self.TASKS}"
+        )
+
+    def _init_renderers(self) -> None:
+        """(Re-)create mujoco.Renderer instances for corner and behindGripper cameras."""
+        self._close_renderers()
+        try:
+            import mujoco  # noqa: PLC0415
+            self._mj_renderer = mujoco.Renderer(
+                self.env.model, height=self._cam_res, width=self._cam_res
+            )
+            self._mj_renderer_wrist = mujoco.Renderer(
+                self.env.model, height=self._cam_res, width=self._cam_res
+            )
+        except Exception:
+            # Graceful degradation: _render_camera returns zeros when renderer is None.
+            self._mj_renderer = None
+            self._mj_renderer_wrist = None
+
+    def _close_renderers(self) -> None:
+        for attr in ("_mj_renderer", "_mj_renderer_wrist"):
+            r = getattr(self, attr, None)
+            if r is not None:
+                try:
+                    r.close()
+                except Exception:
+                    pass
+            setattr(self, attr, None)
+
+    def _render_camera(self, camera_name: str, renderer) -> np.ndarray:
+        """Render one MuJoCo camera view; return 180°-flipped RGB uint8 array."""
+        if renderer is not None:
+            try:
+                renderer.update_scene(self.env.data, camera=camera_name)
+                img = np.asarray(renderer.render(), dtype=np.uint8).copy()
+                # Apply the canonical in-sim 180° flip (matches all other backends).
+                return img[::-1, ::-1]
+            except Exception:
+                pass
+        # Fallback: black frame when rendering is unavailable.
+        return np.zeros((self._cam_res, self._cam_res, 3), dtype=np.uint8)
+
+    def _get_images(self):
+        """Return ``(primary, wrist)`` — corner camera + behindGripper camera."""
+        primary = self._render_camera("corner", self._mj_renderer)
+        wrist = self._render_camera("behindGripper", self._mj_renderer_wrist)
+        return primary, wrist
+
+    # ------------------------------------------------------------------- init
+
+    def init(
+        self,
+        task_name: str,
+        camera_resolution: int = 256,
+        suite: Optional[str] = None,
+        headless: bool = True,
+        sim_config: Optional[dict] = None,
+    ) -> dict:
+        # MuJoCo backend selection must precede any mujoco import.
+        os.environ["MUJOCO_GL"] = "egl" if headless else "glfw"
+        self.headless = headless
+        self._cam_res = int(camera_resolution) if camera_resolution else 256
+
+        import metaworld  # noqa: PLC0415
+
+        task_name_resolved = self._resolve_task(task_name)
+        self._task_name = task_name_resolved
+
+        # MT1 provides 50 procedurally generated variations of one task.
+        mt1 = metaworld.MT1(task_name_resolved, seed=42)
+        env_cls = mt1.train_classes[task_name_resolved]
+        self.env = env_cls()
+        self._tasks = list(mt1.train_tasks)
+
+        # Deterministic: always start with variation 0.
+        self.env.set_task(self._tasks[0])
+        obs, _ = self.env.reset()
+        self._last_obs = obs
+        self._last_reward = 0.0
+        self._last_success = False
+        self._step_count = 0
+
+        # Build MuJoCo renderers now that env.model/env.data are populated.
+        self._init_renderers()
+
+        desc = _MW_TASK_DESCRIPTIONS.get(task_name_resolved, task_name_resolved)
+        return {
+            "task_description": f"Meta-World {task_name_resolved}: {desc}",
+            "task_id": task_name_resolved,
+        }
+
+    # ------------------------------------------------------------------ reset
+
+    def reset(self, episode_index: Optional[int] = None):
+        # Rotate task variation by episode_index for diverse initial states.
+        if self._tasks:
+            task_idx = 0 if episode_index is None else int(episode_index) % len(self._tasks)
+            self.env.set_task(self._tasks[task_idx])
+        obs, _ = self.env.reset()
+        self._last_obs = obs
+        self._last_reward = 0.0
+        self._last_success = False
+        self._step_count = 0
+        return self._get_images()
+
+    # ------------------------------------------------------------------- step
+
+    def step(self, action):
+        action_arr = np.asarray(action, dtype=np.float32).reshape(-1)
+        # Adapt incoming action to the native 4-dim MetaWorld action space.
+        # 7-dim VLA: [dx, dy, dz, drx, dry, drz, gripper] → keep [dx, dy, dz, gripper].
+        # The ActionObsSpec gate should block 7-dim VLAs before reaching here;
+        # this fallback supports isolated unit tests and ROBO_EVAL_STRICT_SPECS=0.
+        n = action_arr.shape[0]
+        if n >= 7:
+            action_4d = np.concatenate([action_arr[:3], action_arr[6:7]])
+        elif n == 4:
+            action_4d = action_arr
+        elif n < 4:
+            action_4d = np.pad(action_arr, (0, 4 - n))
+        else:
+            # 5 or 6 dims: keep first 3 + last.
+            action_4d = np.concatenate([action_arr[:3], action_arr[-1:]])
+
+        obs, reward, terminated, truncated, info = self.env.step(action_4d)
+        self._last_obs = obs
+        self._last_reward = float(reward)
+        self._last_success = bool(info.get("success", False))
+        self._step_count += 1
+        done = bool(terminated or truncated or self._last_success)
+        info_out = dict(info) if isinstance(info, dict) else {}
+        info_out["success"] = self._last_success
+        img, img2 = self._get_images()
+        return img, img2, self._last_reward, done, info_out
+
+    # ---------------------------------------------------------------- get_obs
+
+    def get_obs(self):
+        return self._get_images()
+
+    def check_success(self) -> bool:
+        return self._last_success
+
+    def get_state(self) -> list:
+        """Return the 39-dim metaworld proprioceptive state as a flat float list.
+
+        The upstream TDMPC2 single-task checkpoints are state-based; they
+        require this vector rather than camera images.
+        """
+        obs = self._last_obs
+        if obs is None:
+            return [0.0] * 39
+        return np.asarray(obs, dtype=np.float32).flatten().tolist()
+
+    def close(self) -> None:
+        self._close_renderers()
+        if self.env is not None:
+            try:
+                self.env.close()
+            except Exception:
+                pass
+            finally:
+                self.env = None
+
+    # --------------------------------------------------------------- get_info
+
+    def get_info(self) -> dict:
+        cam_res = self._cam_res
+        return {
+            # 4-dim eef-delta: [dx, dy, dz, gripper].
+            # ``accepted_dims=[4]`` intentionally excludes 7 so the spec gate
+            # catches mismatches with 7-dim VLAs (Pi0.5, SmolVLA, OpenVLA).
+            "action_space": {
+                "type": "eef_delta",
+                "dim": 4,
+                "accepted_dims": [4],
+            },
+            "obs_space": {
+                "cameras": [
+                    {"key": "corner", "resolution": [cam_res, cam_res], "role": "primary"},
+                    {"key": "behindGripper", "resolution": [cam_res, cam_res], "role": "wrist"},
+                ],
+                # MetaWorld observation vector is typically 39-dim for MT-Bench tasks:
+                # [EEF pos (3), EEF vel (3), gripper (1), object features (~32)].
+                "state": {"dim": 39, "format": "metaworld_obs(39)"},
+                "image_transform": "applied_in_sim",
+            },
+            "max_steps": self._max_steps,
+            "delta_actions": True,
+            # ActionObsSpec contract.
+            # INTENTIONAL MISMATCH vs 7-dim VLAs — see class docstring.
+            "action_spec": {
+                "eef_delta": {
+                    "name": "eef_delta",
+                    "dims": 4,
+                    "format": "eef_delta_xyz_gripper",
+                    "accepts": ["eef_delta_xyz_gripper"],
+                },
+            },
+            "observation_spec": {
+                "primary":     {"name": "image",    "dims": 0, "format": "rgb_hwc_uint8"},
+                "wrist":       {"name": "image",    "dims": 0, "format": "rgb_hwc_uint8"},
+                "state":       {"name": "state",    "dims": 39, "format": "metaworld_obs"},
+                "instruction": {"name": "language", "dims": 0, "format": "language"},
+            },
+        }
+
+# === END metaworld ===
+
+
 # ======================================================================
 # Backend registry — add new backends here (key must match SimConfig.name)
 # ======================================================================
 
-BACKENDS = {
+BACKENDS: dict[str, type[SimBackendBase]] = {
     "libero": LiberoBackend,
     "robocasa": RoboCasaBackend,
     "robotwin": RoboTwinBackend,
     "libero_pro": LiberoProBackend,
     "libero_infinity": LiberoInfinityBackend,
+    "aloha_gym": AlohaGymBackend,
+    "gym_pusht": GymPushTBackend,
+    "maniskill2": ManiSkill2Backend,
+    "metaworld": MetaWorldBackend,
 }
 
 
@@ -1436,7 +2990,8 @@ BACKENDS = {
 
 
 class InitRequest(BaseModel):
-    sim: str
+    # sim is optional: if omitted, the server uses the --sim CLI startup arg.
+    sim: Optional[str] = None
     task: str
     suite: Optional[str] = None
     camera_resolution: int = 256
@@ -1470,6 +3025,8 @@ app = FastAPI(title="robo-eval Sim Worker")
 backend = None
 _current_sim_name: str = ""
 _current_suite: str = ""
+# Set in main() from --sim CLI arg; used as default when InitRequest.sim is None.
+_server_sim: str = ""
 
 
 @app.get("/health")
@@ -1506,12 +3063,15 @@ def init_env(req: InitRequest):
     """Initialize (or re-initialize) the simulator backend for a task."""
     global backend, _current_sim_name, _current_suite
     try:
-        _current_sim_name = req.sim
+        # Use the request's sim field; fall back to the server-level --sim arg
+        # so that clients can omit "sim" when the server was started with --sim.
+        sim_name = req.sim or _server_sim
+        _current_sim_name = sim_name
         _current_suite = req.suite or ""
-        if req.sim not in BACKENDS:
+        if sim_name not in BACKENDS:
             return JSONResponse(
                 status_code=400,
-                content={"error": f"Unknown sim '{req.sim}'. Must be one of: {list(BACKENDS.keys())}"},
+                content={"error": f"Unknown sim '{sim_name}'. Must be one of: {list(BACKENDS.keys())}"},
             )
         # req.headless=None means "use server default" set by --headless CLI flag.
         use_headless = req.headless if req.headless is not None else _headless
@@ -1525,7 +3085,7 @@ def init_env(req: InitRequest):
             except Exception:
                 pass  # best-effort cleanup
 
-        if req.sim == "robotwin":
+        if sim_name == "robotwin":
             # RoboTwin takes task_name at construction time and uses initialize().
             # Initialize before assigning to global to avoid race: a concurrent
             # /step would see backend.env=None if we assigned before init().
@@ -1533,7 +3093,7 @@ def init_env(req: InitRequest):
             result = new_backend.initialize(seed=42)
             backend = new_backend
         else:
-            backend_cls = BACKENDS[req.sim]
+            backend_cls = BACKENDS[sim_name]
             # Initialize before assigning to global to avoid race condition:
             # if we did `backend = backend_cls()` first, a concurrent /step
             # would see the new backend with env=None before init() sets it.
@@ -1565,25 +3125,53 @@ def reset_env(req: Optional[ResetRequest] = None):
         # If the environment crashed in a previous episode and set self.env = None,
         # we need to re-initialize it before resetting.
         if backend is not None and hasattr(backend, "env") and backend.env is None:
-            # Re-call the init method with the saved config
+            # Attempt backend-local recovery when supported.
             import logging
             logging.warning("backend.env is None during /reset, attempting to re-initialize.")
             if isinstance(backend, RoboTwinBackend):
                 backend.initialize()
             else:
-                # We need to recreate the offscreen render env.
-                # The easiest way is to let the client handle it by returning a 503,
-                # but we can try to re-init here if we have the args.
-                pass # The client expects a reset, but if env is None, the backend methods will fail.
-                # Actually, raising an explicit error telling the client to re-init is safer.
+                # The offscreen render environment must be recreated by /init.
+                pass
                 return JSONResponse(
                     status_code=503,
                     content={"error": "backend.env is None. Environment crashed. Please call /init again.", "traceback": ""},
                 )
 
         if isinstance(backend, RoboTwinBackend):
-            seed = req.seed if req is not None else 42
-            result = backend.reset(seed=seed)
+            # Seed formula matching RoboTwin's stable evaluation range:
+            #   st_seed = 100_000 * (1 + episode_index)
+            # Seeds 0–99 produce many UnStableError failures; the 100k-scale
+            # range is where RoboTwin's physics stability checks pass reliably.
+            # If UnStableError is raised, increment seed by 1 and retry (up to
+            # 20 attempts).
+            if req is not None and req.episode_index is not None:
+                base_seed = 100_000 * (1 + int(req.episode_index))
+            elif req is not None:
+                base_seed = req.seed
+            else:
+                base_seed = 100_000
+
+            import logging as _log
+            _logger = _log.getLogger(__name__)
+            result = None
+            last_exc = None
+            for _attempt in range(20):
+                seed = base_seed + _attempt
+                try:
+                    result = backend.reset(seed=seed)
+                    break
+                except Exception as _e:
+                    _logger.warning(
+                        "RoboTwin reset seed=%d attempt=%d failed: %s",
+                        seed, _attempt, _e,
+                    )
+                    last_exc = _e
+            if result is None:
+                raise RuntimeError(
+                    f"RoboTwin reset failed after 20 seed attempts "
+                    f"(base={base_seed}): {last_exc}"
+                ) from last_exc
             # After reset, fetch an initial observation so env_wrapper gets
             # image / state / image2 / image3 in the reset response.
             try:
@@ -1757,8 +3345,9 @@ def main():
     # Set the module-level default and MUJOCO_GL *before* uvicorn starts so
     # that the env var is in place before any MuJoCo import happens anywhere
     # in the process. Individual backends also re-assert it in their init().
-    global _headless
+    global _headless, _server_sim
     _headless = args.headless
+    _server_sim = args.sim
     os.environ["MUJOCO_GL"] = "egl" if args.headless else "glfw"
 
     logger.info(

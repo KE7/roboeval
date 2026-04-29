@@ -1,6 +1,6 @@
 """Slim subprocess launcher for VLA policy servers and sim_worker.
 
-Used by ``robo-eval serve`` to start and manage the per-VLA host-venv process
+Used by ``roboeval serve`` to start and manage the per-VLA host-venv process
 and the sim_worker process.
 
 Signal handling:
@@ -69,14 +69,14 @@ def _signal_handler(signum: int, _frame: Any) -> None:
 atexit.register(_cleanup_all)
 # NOTE: signal handlers are intentionally NOT installed at module import time.
 # Call install_signal_handlers() from CLI entry points that own the process
-# lifecycle (e.g. robo-eval serve).  Importing this module must be side-effect
+# lifecycle (e.g. roboeval serve).  Importing this module must be side-effect
 # free so that orchestrators and test suites are unaffected.
 
 
 def install_signal_handlers() -> None:
     """Install SIGINT / SIGTERM handlers that gracefully terminate managed processes.
 
-    Must be called explicitly from CLI entry points (``robo-eval serve``) that
+    Must be called explicitly from CLI entry points (``roboeval serve``) that
     own the process lifecycle.  Do **not** call at module import time — callers
     that merely *use* ``start_vla`` / ``start_sim`` should not have their signal
     handling silently overridden.
@@ -93,9 +93,12 @@ def install_signal_handlers() -> None:
 _VLA_MODULE_MAP: dict[str, str] = {
     "pi05": "sims.vla_policies.pi05_policy",
     "vqbet": "sims.vla_policies.vqbet_policy",
+    "act": "sims.vla_policies.act_policy",
+    "diffusion_policy": "sims.vla_policies.diffusion_policy_policy",
     "tdmpc2": "sims.vla_policies.tdmpc2_policy",
     "smolvla": "sims.vla_policies.smolvla_policy",
     "openvla": "sims.vla_policies.openvla_policy",
+    "octo": "sims.vla_policies.octo_policy",
     "cosmos": "sims.vla_policies.cosmos_policy",
     "groot": "sims.vla_policies.groot_policy",
     "internvla": "sims.vla_policies.internvla_policy",
@@ -103,23 +106,29 @@ _VLA_MODULE_MAP: dict[str, str] = {
 
 # Default venv paths per VLA (relative to project root; override via config)
 _VLA_DEFAULT_VENVS: dict[str, str] = {
-    "pi05": ".venvs/vla",
+    "pi05": ".venvs/pi05",
     "vqbet": ".venvs/vqbet",
+    "act": ".venvs/act",
+    "diffusion_policy": ".venvs/diffusion_policy",
     "tdmpc2": ".venvs/tdmpc2",
     "smolvla": ".venvs/smolvla",
     "openvla": ".venvs/openvla",
-    "cosmos": ".venvs/vla",
-    "groot": ".venvs/vla",
-    "internvla": ".venvs/vla",
+    "octo": ".venvs/octo",
+    "cosmos": ".venvs/cosmos",
+    "groot": ".venvs/groot",
+    "internvla": ".venvs/internvla",
 }
 
 # Default ports
 _VLA_DEFAULT_PORTS: dict[str, int] = {
     "pi05": 5100,
     "vqbet": 5108,
+    "act": 5106,
+    "diffusion_policy": 5107,
     "tdmpc2": 5109,
     "smolvla": 5102,
     "openvla": 5101,
+    "octo": 5110,
     "cosmos": 5103,
     "groot": 5104,
     "internvla": 5105,
@@ -131,6 +140,8 @@ _SIM_DEFAULT_PORTS: dict[str, int] = {
     "robocasa": 5302,
     "robotwin": 5303,
     "aloha_gym": 5304,
+    "gym_pusht": 5305,
+    "metaworld": 5306,
     "libero_infinity": 5308,
 }
 
@@ -140,6 +151,8 @@ _SIM_DEFAULT_VENVS: dict[str, str] = {
     "robocasa": ".venvs/robocasa",
     "robotwin": ".venvs/robotwin",
     "aloha_gym": ".venvs/aloha_gym",
+    "gym_pusht": ".venvs/gym_pusht",
+    "metaworld": ".venvs/metaworld",
     # libero_infinity requires Python 3.11 or newer.
     "libero_infinity": ".venvs/libero_infinity",
 }
@@ -243,6 +256,54 @@ def _poll_health(url: str, timeout: float = 60.0, interval: float = 2.0) -> tupl
     return False, last_error or "timeout"
 
 
+def _launch_and_wait(
+    *,
+    log_name: str,
+    display_kind: str,
+    display_name: str,
+    port: int,
+    cmd: list[str],
+    logs_dir: Path,
+    project_root: Path,
+    env: dict[str, str],
+    health_timeout: float,
+) -> subprocess.Popen:
+    """Launch a managed subprocess and wait for its /health endpoint."""
+    log_f = _open_log(log_name, logs_dir)
+    logger.info("Starting %s: %s (port=%d)", display_kind, display_name, port)
+    logger.debug("Command: %s", " ".join(cmd))
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=log_f,
+        stderr=log_f,
+        cwd=str(project_root),
+        env=env,
+        start_new_session=True,
+    )
+    _MANAGED_PROCS.append(proc)
+
+    url = f"http://localhost:{port}"
+    logger.info("Waiting for %s to be ready at %s/health ...", display_kind, url)
+    ready, last_error = _poll_health(url, timeout=health_timeout)
+    if not ready:
+        log_path = logs_dir / f"{log_name}.log"
+        tail = _tail_log(log_path, n=30)
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except OSError:
+            pass
+        _MANAGED_PROCS.remove(proc)
+        raise RuntimeError(
+            f"{display_kind} {display_name!r} did not become ready within {health_timeout}s.\n"
+            f"  /health last error: {last_error or 'no response'}\n"
+            f"  log tail ({log_path}, last 30 lines):\n{tail}"
+        )
+
+    logger.info("%s %r is ready (port=%d)", display_kind, display_name, port)
+    return proc
+
+
 def start_vla(
     vla_name: str,
     port: int | None = None,
@@ -312,40 +373,17 @@ def start_vla(
     if extra_env:
         env.update(extra_env)
 
-    log_f = _open_log(f"vla_{vla_name}", logs_dir)
-    logger.info("Starting VLA server: %s (port=%d)", vla_name, port)
-    logger.debug("Command: %s", " ".join(cmd))
-
-    proc = subprocess.Popen(
-        cmd,
-        stdout=log_f,
-        stderr=log_f,
-        cwd=str(project_root),
+    return _launch_and_wait(
+        log_name=f"vla_{vla_name}",
+        display_kind="VLA server",
+        display_name=vla_name,
+        port=port,
+        cmd=cmd,
+        logs_dir=logs_dir,
+        project_root=project_root,
         env=env,
-        start_new_session=True,  # own pgid so cleanup can fan out
+        health_timeout=health_timeout,
     )
-    _MANAGED_PROCS.append(proc)
-
-    # Poll /health
-    url = f"http://localhost:{port}"
-    logger.info("Waiting for VLA server to be ready at %s/health ...", url)
-    ready, last_error = _poll_health(url, timeout=health_timeout)
-    if not ready:
-        log_path = Path(logs_dir) / f"vla_{vla_name}.log"
-        tail = _tail_log(log_path, n=30)
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except OSError:
-            pass
-        _MANAGED_PROCS.remove(proc)
-        raise RuntimeError(
-            f"VLA server {vla_name!r} did not become ready within {health_timeout}s.\n"
-            f"  /health last error: {last_error or 'no response'}\n"
-            f"  log tail ({log_path}, last 30 lines):\n{tail}"
-        )
-
-    logger.info("VLA server %r is ready (port=%d)", vla_name, port)
-    return proc
 
 
 def start_sim(
@@ -432,39 +470,17 @@ def start_sim(
     if backend == "robotwin":
         env.pop("DISPLAY", None)
 
-    log_f = _open_log(f"sim_{backend}", logs_dir)
-    logger.info("Starting sim_worker: %s (port=%d)", backend, port)
-    logger.debug("Command: %s", " ".join(cmd))
-
-    proc = subprocess.Popen(
-        cmd,
-        stdout=log_f,
-        stderr=log_f,
-        cwd=str(project_root),
+    return _launch_and_wait(
+        log_name=f"sim_{backend}",
+        display_kind="sim_worker",
+        display_name=backend,
+        port=port,
+        cmd=cmd,
+        logs_dir=logs_dir,
+        project_root=project_root,
         env=env,
-        start_new_session=True,
+        health_timeout=health_timeout,
     )
-    _MANAGED_PROCS.append(proc)
-
-    url = f"http://localhost:{port}"
-    logger.info("Waiting for sim_worker to be ready at %s/health ...", url)
-    ready, last_error = _poll_health(url, timeout=health_timeout)
-    if not ready:
-        log_path = Path(logs_dir) / f"sim_{backend}.log"
-        tail = _tail_log(log_path, n=30)
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except OSError:
-            pass
-        _MANAGED_PROCS.remove(proc)
-        raise RuntimeError(
-            f"sim_worker {backend!r} did not become ready within {health_timeout}s.\n"
-            f"  /health last error: {last_error or 'no response'}\n"
-            f"  log tail ({log_path}, last 30 lines):\n{tail}"
-        )
-
-    logger.info("sim_worker %r is ready (port=%d)", backend, port)
-    return proc
 
 
 def wait_for_exit(procs: list[subprocess.Popen]) -> None:

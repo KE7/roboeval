@@ -1,8 +1,8 @@
 """VLM methods for plan generation, assessment, and reasoning.
 
-This module provides all VLM (Vision-Language Model) interaction functions used
-by the robo-eval system: object identification, plan program generation, subtask
-assessment, success/failure reasoning, and reflexion-style feedback.
+This module provides VLM (Vision-Language Model) interaction functions for
+object identification, plan program generation, subtask assessment,
+success/failure reasoning, and reflexion-style feedback.
 
 All VLM calls are routed through litellm for provider-agnostic model access.
 Configure the endpoint with ``setup_litellm()`` or via the litellm proxy.
@@ -22,8 +22,7 @@ from io import BytesIO
 import cv2
 from ica.reasoning_ica import ReasoningICADir, TaskICADir
 
-# API key: prefer OPENAI_API_KEY env var, then fall back to a key file if present.
-# For local litellm proxy setups, "not-needed" is the conventional placeholder.
+# API key resolution for direct API calls and proxy-compatible setups.
 _key_path = os.path.join(os.path.dirname(__file__), "..", "utils", "openaikey.txt")
 _openai_key = os.environ.get("OPENAI_API_KEY")
 if not _openai_key and os.path.exists(_key_path):
@@ -32,8 +31,8 @@ if not _openai_key and os.path.exists(_key_path):
 if not _openai_key:
     _openai_key = "not-needed"
 
-# VLM Configuration — set by setup_litellm() or defaults for direct OpenAI use.
-vlm_api_base = None  # e.g. "http://localhost:4000/v1" for litellm proxy
+# VLM configuration is set by setup_litellm() or by the defaults below.
+vlm_api_base = None
 vlm_api_key = _openai_key
 
 # Default OpenAI model names (used when NOT routed through litellm proxy).
@@ -133,6 +132,12 @@ def _call_litellm(model, messages, no_think=False):
         # Gemini thinking models: budget=0 disables reasoning tokens.
         # Use extra_body (raw passthrough) to avoid litellm's OpenAI param validation.
         kwargs["extra_body"] = {"thinking": {"thinking_budget": 0}}
+    if vlm_api_base is not None and "Qwen" in model:
+        extra_body = dict(kwargs.get("extra_body") or {})
+        chat_template_kwargs = dict(extra_body.get("chat_template_kwargs") or {})
+        chat_template_kwargs["enable_thinking"] = False
+        extra_body["chat_template_kwargs"] = chat_template_kwargs
+        kwargs["extra_body"] = extra_body
     return litellm.completion(**kwargs)
 
 
@@ -153,16 +158,14 @@ def format_obj_list(objects_list):
 
 def get_hardware_specific_instruction_space():
     """
-    Load the instruction space details from a text file for your task and hardware setup.
-    We've provided an example for the DROID setup here.
-    You should modify this function for your own setup and hardware.
+    Load hardware-specific instruction space details from the configured prompt file.
     """
     with open("vlm_hl/prompts/plan_reasoning/droid_specific_instruction_space.txt", "r") as f:
         sp_instruction_space = f.readlines()
     return format_obj_list(sp_instruction_space)
 
 def vlm_call_with_image(
-    image: Image.Image, prompt: str, model: str = vision_model, tf: bool = False
+    image: Image.Image, prompt: str | None = None, model: str | None = None, tf: bool = False
 ):
     """Call the VLM with an image and text prompt.
 
@@ -175,6 +178,8 @@ def vlm_call_with_image(
     Returns:
         Boolean if ``tf=True``, otherwise the raw text response.
     """
+    if model is None:
+        model = vision_model
     image_b64 = encode_image_to_base64(image)
     messages = [
         {
@@ -200,7 +205,7 @@ def vlm_call_with_image(
         return vlm_response
 
 
-def vlm_call_with_text(prompt: str, model: str = text_model, tf: bool = False):
+def vlm_call_with_text(prompt: str, model: str | None = None, tf: bool = False):
     """Call the VLM with a text-only prompt (no image).
 
     Args:
@@ -211,6 +216,8 @@ def vlm_call_with_text(prompt: str, model: str = text_model, tf: bool = False):
     Returns:
         Boolean if ``tf=True``, otherwise the raw text response.
     """
+    if model is None:
+        model = text_model
     messages = [{"role": "user", "content": prompt}]
     if tf:
         msgs_with_schema = _append_schema_to_messages(messages, TFAnswer)
@@ -309,7 +316,6 @@ def get_object_uids_from_scene(
     prompt = prompt.format(
         instruction=task_instruction
     )
-    # now, get the response from the VLM
     image_b64 = encode_image_to_base64(current_image)
     messages = [
         {
@@ -702,7 +708,7 @@ def generate_program_with_reflexion_baseline(
     )
     system_msg = {"role": "system", "content": formatted_system_msg}
 
-    # DROID-specific instruction provision
+    # Hardware-specific instruction addendum
     content = []
     with open(
         "vlm_hl/prompts/plan_reasoning/format_task.txt", "r", encoding="utf-8"
@@ -778,7 +784,6 @@ def generate_program_with_icl_baseline(
     )
     system_msg = {"role": "system", "content": formatted_system_msg}
 
-    # Finetuning
     # Top-level user message
     content = []
     with open(
@@ -855,7 +860,6 @@ def generate_program_with_nor_ablation(
     )
     system_msg = {"role": "system", "content": formatted_system_msg}
 
-    # Finetuning
     # Top-level user message
     content = []
     with open(
@@ -932,7 +936,6 @@ def generate_program_with_who_ablation(
     )
     system_msg = {"role": "system", "content": formatted_system_msg}
 
-    # Finetuning
     # Top-level user message
     content = []
     with open(
@@ -1019,7 +1022,6 @@ def generate_planner_program(
     )
     system_msg = {"role": "system", "content": formatted_system_msg}
 
-    # Finetuning
     # Top-level user message
     content = []
     with open(

@@ -4,6 +4,7 @@ Simulator Environment Wrapper for LITEN.
 Wraps robotic simulators (LIBERO, RoboCasa, RoboTwin, LIBERO-Pro) as a
 BaseWorldStub by communicating with a sim_worker HTTP server.
 """
+from __future__ import annotations
 
 import base64
 import logging
@@ -18,6 +19,129 @@ logger = logging.getLogger(__name__)
 
 from world_stubs import BaseWorldStub
 
+try:
+    from robo_eval.specs import ActionObsSpec, check_specs
+    _SPECS_AVAILABLE = True
+except ImportError:
+    _SPECS_AVAILABLE = False
+
+
+class SpecMismatchError(RuntimeError):
+    """Raised when VLA and sim spec contracts are incompatible (HARD severity)."""
+
+
+class ActionChunkBuffer:
+    """
+    Buffer for action chunks from a VLA policy with configurable trimming and blending.
+
+    When the policy returns a chunk of N actions this buffer:
+
+    1. Trims the incoming chunk to ``chunk_size`` (prevents executing stale tail
+       of a large chunk — e.g. pi0.5 returns 50 but effective chunk_size may be 10).
+    2. Optionally blends overlapping positions with any *remaining* buffered actions
+       from the previous inference call (reduces jerkiness on re-plan).
+    3. Pops one action per env step; inference is only called again when the
+       buffer drains.
+
+    Blending strategies
+    -------------------
+    ``"newest"`` (default)
+        Incoming chunk overwrites the remaining buffer entirely.
+    ``"average"``
+        Element-wise mean at overlapping positions; tail of new chunk appended.
+    ``"ema"``
+        ``alpha * new + (1 - alpha) * old`` at overlapping positions;
+        tail of new chunk appended.  ``alpha`` is controlled by ``ema_alpha``.
+    """
+
+    def __init__(
+        self,
+        chunk_size: int = None,
+        action_ensemble: str = "newest",
+        ema_alpha: float = 0.5,
+    ):
+        """
+        Args:
+            chunk_size: Max actions to keep from each incoming chunk.
+                ``None`` means keep the full chunk as returned by the policy.
+            action_ensemble: Blending strategy (``"newest"``, ``"average"``,
+                or ``"ema"``).
+            ema_alpha: Blend coefficient for ``"ema"`` strategy.
+                ``alpha * new + (1 - alpha) * old``.  Must be in ``[0, 1]``.
+        """
+        if action_ensemble not in ("newest", "average", "ema"):
+            raise ValueError(
+                f"action_ensemble must be one of 'newest', 'average', 'ema'; "
+                f"got {action_ensemble!r}"
+            )
+        self._chunk_size = chunk_size
+        self._action_ensemble = action_ensemble
+        self._ema_alpha = ema_alpha
+        self._buffer: list = []
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    @property
+    def empty(self) -> bool:
+        """True when no actions remain in the buffer."""
+        return len(self._buffer) == 0
+
+    def push(self, new_chunk: list) -> None:
+        """Push a new chunk into the buffer, trimming and blending as configured.
+
+        Args:
+            new_chunk: List of action vectors returned by the VLA policy.
+                Each element is a ``list[float]`` (one action).
+        """
+        # Trim to configured chunk_size (None = keep all)
+        if self._chunk_size is not None:
+            new_chunk = list(new_chunk[: self._chunk_size])
+        else:
+            new_chunk = list(new_chunk)
+
+        if not new_chunk:
+            return
+
+        if self._action_ensemble == "newest" or not self._buffer:
+            # Replace remaining buffer entirely with the new chunk.
+            self._buffer = new_chunk
+            return
+
+        overlap = min(len(self._buffer), len(new_chunk))
+
+        if self._action_ensemble == "average":
+            blended = []
+            for i in range(overlap):
+                old_a = np.array(self._buffer[i], dtype=float)
+                new_a = np.array(new_chunk[i], dtype=float)
+                blended.append(((old_a + new_a) / 2.0).tolist())
+        elif self._action_ensemble == "ema":
+            alpha = self._ema_alpha
+            blended = []
+            for i in range(overlap):
+                old_a = np.array(self._buffer[i], dtype=float)
+                new_a = np.array(new_chunk[i], dtype=float)
+                blended.append((alpha * new_a + (1.0 - alpha) * old_a).tolist())
+        else:
+            # Should never reach here given __init__ validation, but be safe.
+            blended = list(new_chunk[:overlap])
+
+        # Append the non-overlapping tail of the new chunk.
+        blended.extend(new_chunk[overlap:])
+        self._buffer = blended
+
+    def pop(self):
+        """Pop and return the next action vector, or ``None`` if empty."""
+        if not self._buffer:
+            return None
+        return self._buffer.pop(0)
+
+    def clear(self) -> None:
+        """Discard all buffered actions (call on episode reset or new subtask)."""
+        self._buffer = []
+
 # Expected action space per simulator (type + dim) for action translation.
 # Also used for random-action fallback sizing (via the "dim" field).
 SIM_EXPECTED_ACTION_SPACE = {
@@ -26,6 +150,12 @@ SIM_EXPECTED_ACTION_SPACE = {
     "libero_infinity": {"type": "eef_delta", "dim": 7},
     "robocasa":   {"type": "eef_delta", "dim": 12},
     "robotwin":   {"type": "joint_pos", "dim": 14},
+    # gym-aloha bimanual sim: 14-dim absolute joint positions (7 per arm)
+    "aloha_gym":  {"type": "joint_pos", "dim": 14},
+    # gym-pusht: 2-dim (x, y) end-effector position in pixel space [0,512]
+    "gym_pusht":  {"type": "eef_xy", "dim": 2},
+    # Meta-World (Sawyer robot): 4-dim Sawyer eef-delta [dx, dy, dz, gripper].
+    "metaworld": {"type": "eef_delta", "dim": 4},
 }
 
 # Derived: default action dim per simulator (for backward compat and convenience)
@@ -38,6 +168,12 @@ SIM_MAX_STEPS = {
     "robocasa": 500,
     "robotwin": 300,
     "libero_pro": 500,
+    # gym-aloha: 400 steps is the registered spec max_episode_steps
+    "aloha_gym": 400,
+    # gym-pusht: 300 steps (standard PushT horizon)
+    "gym_pusht": 300,
+    # Meta-World: 500 steps per episode (standard metaworld horizon)
+    "metaworld": 500,
 }
 
 # Suite-specific rollout horizons.
@@ -63,6 +199,9 @@ SUITE_MAX_STEPS = {
     # RoboCasa and RoboTwin benchmark-scoped suite names
     "robocasa_kitchen": 500,
     "robotwin_aloha_agilex": 300,
+    # gym-aloha task suites (gymnasium IDs used as suite names)
+    "AlohaTransferCube-v0": 400,
+    "AlohaInsertion-v0": 400,
 }
 
 VALID_SIMS = list(SIM_ACTION_DIM.keys())
@@ -85,6 +224,10 @@ def _image_to_numpy(img: Image.Image) -> np.ndarray:
 
 def _apply_image_transform(img: Image.Image, transform: str) -> Image.Image:
     if not transform or transform == "none":
+        return img
+    # "applied_in_sim" means the sim backend already applied the flip;
+    # env_wrapper must not apply a second flip.
+    if transform == "applied_in_sim":
         return img
     arr = np.array(img)
     if transform == "flip_hw":
@@ -117,6 +260,9 @@ class SimWrapper(BaseWorldStub):
         delta_actions: bool = False,
         no_vlm: bool = False,
         sim_config: Optional[dict] = None,
+        chunk_size: int = None,
+        action_ensemble: str = "newest",
+        ema_alpha: float = 0.5,
     ):
         self.sim_server_url = sim_server_url.rstrip("/")
         self._sim_config = sim_config or {}
@@ -152,6 +298,22 @@ class SimWrapper(BaseWorldStub):
         self._delta_actions = delta_actions
         self._image_transform = "none"
         self._current_state_dict = None
+
+        # Action chunk buffer configuration.
+        # _chunk_size_override=None means "use the model's action_chunk_size from /info".
+        # _effective_chunk_size is resolved in _fetch_policy_info() once /info is available.
+        self._chunk_size_override = chunk_size
+        self._action_ensemble = action_ensemble
+        self._ema_alpha = ema_alpha
+        self._effective_chunk_size: int = chunk_size  # preliminary; updated after /info
+        # The buffer itself is created after _effective_chunk_size is known (see
+        # _fetch_policy_info).  We pre-create it here as a safety net so that
+        # physical_reset() can always call _action_buffer.clear() unconditionally.
+        self._action_buffer = ActionChunkBuffer(
+            chunk_size=self._effective_chunk_size,
+            action_ensemble=self._action_ensemble,
+            ema_alpha=self._ema_alpha,
+        )
         self._fetch_policy_info()
 
         # Initialize the environment via HTTP, passing the headless flag so the
@@ -174,6 +336,7 @@ class SimWrapper(BaseWorldStub):
         self._fetch_sim_info()
         self._negotiate_spaces()
         self._negotiate_obs()
+        self._validate_specs()
 
         # Use the task description from the sim if available, else the raw name
         task_desc = resp.get("task_description", task_name)
@@ -295,13 +458,13 @@ class SimWrapper(BaseWorldStub):
         if not req:
             self._image_transform = "none"
             return
-            
+
         req_cams = req.get("cameras", [])
         sim_cams = [c.get("role") for c in self._sim_info.get("obs_space", {}).get("cameras", [])]
         for c in req_cams:
             if c not in sim_cams:
                 raise ValueError(f"Camera mismatch: VLA requires '{c}' but sim only provides {sim_cams}")
-                
+
         req_state_format = req.get("state_format", "flat")
         req_state_dim = req.get("state_dim", 0)
         sim_state_dim = self._sim_info.get("obs_space", {}).get("state", {}).get("dim", 0)
@@ -312,14 +475,152 @@ class SimWrapper(BaseWorldStub):
                 # Only compare scalars-to-scalars for flat state formats.
                 # Structured state: GR00T has 5 "keys" != RoboCasa 9 "floats" — incomparable units.
                 raise ValueError(f"State dim mismatch: VLA={req_state_dim}, sim={sim_state_dim}")
-                
+
         self._image_transform = req.get("image_transform", "none")
+
+    def _validate_specs(self) -> None:
+        """Cross-validate VLA and sim ActionObsSpec contracts after both /info calls complete.
+
+        Severity rules applied here:
+        - HARD → raise SpecMismatchError (unless ROBO_EVAL_STRICT_SPECS=0)
+        - WARN → log warning
+        - IGNORE / legacy (no specs) → log once at INFO, continue
+
+        image_transform HARD conditions (checked first, independently of ActionObsSpec):
+        - sim says "applied_in_sim" AND vla says "flip_hw" or "flip_h" → double flip
+        - sim says "none" or absent AND vla says "flip_hw" or "flip_h" → missing backend transform
+
+        Gate: set ROBO_EVAL_STRICT_SPECS=0 to demote all HARD failures to WARN
+        (escape hatch for legacy servers in CI).
+        """
+        strict = os.environ.get("ROBO_EVAL_STRICT_SPECS", "1") not in ("0", "false", "False")
+
+        # ── image_transform HARD check ────────────────────────────────────────
+        sim_img_xfm = self._sim_info.get("obs_space", {}).get("image_transform", "none")
+        vla_img_xfm = self._image_transform  # already stored by _negotiate_obs()
+
+        hard_msgs: list[str] = []
+
+        if sim_img_xfm == "applied_in_sim" and vla_img_xfm in ("flip_hw", "flip_h"):
+            hard_msgs.append(
+                f"image_transform conflict: sim='applied_in_sim' but VLA='{vla_img_xfm}' "
+                f"— would cause a double flip; ensure the VLA advertises 'applied_in_sim' or 'none'"
+            )
+        elif sim_img_xfm not in ("applied_in_sim",) and vla_img_xfm in ("flip_hw", "flip_h"):
+            hard_msgs.append(
+                f"image_transform conflict: sim='{sim_img_xfm}' (not applying flip) but "
+                f"VLA='{vla_img_xfm}' (expects flip); "
+                f"ensure the sim applies the flip and advertises 'applied_in_sim'"
+            )
+
+        for msg in hard_msgs:
+            if strict:
+                raise SpecMismatchError(f"HARD spec mismatch: {msg}")
+            else:
+                logger.warning("HARD spec mismatch (strict=off, continuing): %s", msg)
+
+        # ── ActionObsSpec check via check_specs() ──────────────────────────────────
+        if not _SPECS_AVAILABLE:
+            logger.debug("robo_eval.specs not available; skipping ActionObsSpec validation")
+            return
+
+        # Deserialize spec dicts from both sides
+        def _load_spec(raw: dict) -> "dict[str, ActionObsSpec]":
+            if not raw:
+                return {}
+            result = {}
+            for k, v in raw.items():
+                if isinstance(v, dict):
+                    try:
+                        result[k] = ActionObsSpec.from_dict(v)
+                    except Exception as exc:
+                        logger.warning("Could not deserialize ActionObsSpec for '%s': %s", k, exc)
+            return result
+
+        vla_action_spec = _load_spec(self._policy_info.get("action_spec", {}))
+        vla_obs_spec = _load_spec(self._policy_info.get("observation_spec", {}))
+        sim_action_spec = _load_spec(self._sim_info.get("action_spec", {}))
+        sim_obs_spec = _load_spec(self._sim_info.get("observation_spec", {}))
+
+        # ── Legacy / one-sided spec declaration ─────────────────────────────
+        # In strict mode, one-sided declarations are treated as HARD failures:
+        # if the model declares a contract, the sim must declare a contract too
+        # (and vice versa), or compatibility cannot be verified.
+        sim_has_specs = bool(sim_action_spec or sim_obs_spec)
+        vla_has_specs = bool(vla_action_spec or vla_obs_spec)
+        if not sim_has_specs or not vla_has_specs:
+            if not sim_has_specs and not vla_has_specs:
+                # Both sides legacy — emit a WARN and skip (no contract to check).
+                logger.warning(
+                    "Spec WARN: no action_spec or observation_spec declared (legacy server); "
+                    "skipping ActionObsSpec validation"
+                )
+                logger.warning("spec validation passed (legacy mode)")
+                return
+            # One-sided declarations are HARD failures under strict mode.
+            if not sim_has_specs:
+                msg = (
+                    "sim declares no ActionObsSpec contracts but VLA does; cannot verify "
+                    "state/action compatibility (e.g. RoboCasa 9-dim quat vs LIBERO 8-dim "
+                    "axis-angle).  Add get_action_spec()/get_observation_spec() to the sim backend."
+                )
+            else:
+                msg = (
+                    "VLA declares no ActionObsSpec contracts but sim does; cannot verify "
+                    "state/action compatibility.  Add get_action_spec()/get_observation_spec() "
+                    "to the VLA policy server."
+                )
+            if strict:
+                raise SpecMismatchError(f"HARD spec mismatch: {msg}")
+            logger.warning("HARD spec mismatch (strict=off, continuing): %s", msg)
+            return
+
+        issues = check_specs(
+            server_action=vla_action_spec,
+            bench_action=sim_action_spec,
+            server_obs=vla_obs_spec,
+            bench_obs=sim_obs_spec,
+        )
+
+        has_hard = False
+        hard_details: list[str] = []
+        for severity, msg in issues:
+            if severity == "HARD":
+                has_hard = True
+                hard_details.append(msg)
+                if not strict:
+                    logger.warning("HARD spec mismatch (strict=off, continuing): %s", msg)
+                else:
+                    logger.error("HARD spec mismatch: %s", msg)
+            elif severity == "WARN":
+                logger.warning("Spec WARN: %s", msg)
+
+        if has_hard and strict:
+            raise SpecMismatchError(
+                "Spec validation failed (HARD):\n" + "\n".join(f"  • {m}" for m in hard_details)
+            )
+
+        if issues:
+            logger.warning(
+                "spec validation passed (with %d warning(s))",
+                sum(1 for s, _ in issues if s == "WARN"),
+            )
+        else:
+            logger.warning("spec validation passed")
 
     def _fetch_policy_info(self) -> None:
         """Fetch /info from the policy server and store action space metadata.
 
         Called at init. If the policy server is not yet reachable, falls back to
         the default eef_delta dim=7 space and tries again lazily on first act().
+
+        Also resolves ``_effective_chunk_size``:
+          * If the user provided ``chunk_size`` (``_chunk_size_override``), use it.
+          * Otherwise fall back to the model's ``action_chunk_size`` from ``/info``
+            (default 1 if the field is absent).
+
+        After resolving the effective chunk size, re-creates ``_action_buffer``
+        so it uses the correct trimming configuration.
         """
         try:
             r = requests.get(f"{self.vla_server_url}/info", timeout=5)
@@ -339,6 +640,53 @@ class SimWrapper(BaseWorldStub):
                 self.vla_server_url,
                 self._policy_action_space,
             )
+
+        # Resolve effective chunk size: user override takes priority over model default.
+        model_chunk_size = self._policy_info.get("action_chunk_size", 1)
+        self._effective_chunk_size = self._chunk_size_override or model_chunk_size
+        logger.info(
+            "Action chunk buffer: effective_chunk_size=%d "
+            "(override=%s, model_default=%d), ensemble=%s, ema_alpha=%.2f",
+            self._effective_chunk_size,
+            self._chunk_size_override,
+            model_chunk_size,
+            self._action_ensemble,
+            self._ema_alpha,
+        )
+        # Rebuild the buffer now that we know the effective chunk size.
+        self._action_buffer = ActionChunkBuffer(
+            chunk_size=self._effective_chunk_size,
+            action_ensemble=self._action_ensemble,
+            ema_alpha=self._ema_alpha,
+        )
+
+    def _validate_action_chunk(self, chunk: list, expected_dim: int | None = None) -> None:
+        """Reject NaN / inf / wrong-shape actions before they hit the sim.
+
+        Without this check, NaN actions slip into MuJoCo and surface as a
+        SIGABRT inside sim_worker — the orchestrator just sees ``nonzero_exit_-6``
+        with no indication that the *VLA* was at fault.
+        """
+        if not isinstance(chunk, list) or not chunk:
+            raise ValueError(
+                "VLA returned an empty or non-list action chunk; "
+                f"got: {type(chunk).__name__}"
+            )
+        for i, a in enumerate(chunk):
+            arr = np.asarray(a, dtype=float)
+            if expected_dim is not None and arr.size != expected_dim:
+                raise ValueError(
+                    f"VLA action chunk[{i}] has dim={arr.size} but the "
+                    f"negotiated action_dim is {expected_dim}. Check the "
+                    f"policy's get_action_spec() and that obs preprocessing "
+                    f"matches its training data."
+                )
+            if not np.all(np.isfinite(arr)):
+                raise ValueError(
+                    f"VLA action chunk[{i}] contains NaN or inf: {arr.tolist()!r}. "
+                    f"This usually means the policy is uninitialized, the input "
+                    f"normalisation is wrong, or training diverged."
+                )
 
     def _translate_action(
         self, action: list, from_space: dict, to_space: dict
@@ -511,6 +859,10 @@ class SimWrapper(BaseWorldStub):
 
         frames = []
 
+        # Clear the action buffer at the start of every subtask so that stale
+        # actions from a previous subtask (different command) are not replayed.
+        self._action_buffer.clear()
+
         # Use the reset observation directly so the first policy call sees the
         # exact scene returned by /reset instead of an extra round-trip /obs.
         current_obs = (
@@ -524,55 +876,60 @@ class SimWrapper(BaseWorldStub):
         done = False
 
         while step < self.max_steps and not done:
-            # --- Get action chunk ---
-            try:
-                chunk = self._get_vla_actions(
-                    current_obs,
-                    command,
-                    state=self._current_state or None,
-                )
-            except requests.exceptions.ConnectionError:
-                raise ConnectionError(
-                    f"[SimWrapper] VLA server became unreachable at "
-                    f"{self.vla_server_url} during rollout (step {step}/{self.max_steps}). "
-                    f"Aborting episode."
-                )
+            # --- Refill buffer when empty ---
+            if self._action_buffer.empty:
+                try:
+                    chunk = self._get_vla_actions(
+                        current_obs,
+                        command,
+                        state=self._current_state or None,
+                    )
+                    self._validate_action_chunk(chunk, expected_dim=self.action_dim)
+                except requests.exceptions.ConnectionError:
+                    raise ConnectionError(
+                        f"[SimWrapper] VLA server became unreachable at "
+                        f"{self.vla_server_url} during rollout (step {step}/{self.max_steps}). "
+                        f"Aborting episode."
+                    )
+                self._action_buffer.push(chunk)
 
-            # --- Execute each action in the chunk ---
-            for raw_action in chunk:
-                if step >= self.max_steps or done:
-                    break
+            # --- Pop one action from the buffer ---
+            raw_action = self._action_buffer.pop()
+            if raw_action is None:
+                # Buffer is empty after push — shouldn't happen, but guard.
+                logger.warning("Action buffer empty immediately after push; breaking.")
+                break
 
-                # Translate from policy action space to sim action space.
-                # Clipping is policy-specific; only gripper dim is clipped (inside
-                # _translate_action). Real-space EEF deltas must NOT be clipped here.
-                action = self._translate_action(
-                    raw_action,
-                    self._policy_action_space,
-                    self._sim_expected_action_space,
-                )
+            # Translate from policy action space to sim action space.
+            # Clipping is policy-specific; only gripper dim is clipped (inside
+            # _translate_action). Real-space EEF deltas must NOT be clipped here.
+            action = self._translate_action(
+                raw_action,
+                self._policy_action_space,
+                self._sim_expected_action_space,
+            )
 
-                resp = self._post("/step", {"action": action})
-                if "error" in resp:
-                    logger.error("Step failed: %s", resp['error'])
-                    done = True
-                    break
+            resp = self._post("/step", {"action": action})
+            if "error" in resp:
+                logger.error("Step failed: %s", resp['error'])
+                done = True
+                break
 
-                # Decode the observation frame and update proprioceptive state
-                self._parse_images_from_resp(resp)
-                current_obs = self._current_images["primary"]
-                if "state" in resp:
-                    self._current_state = resp["state"]
-                if "state_dict" in resp:
-                    self._current_state_dict = resp["state_dict"]
-                frames.append(_image_to_numpy(current_obs))
-                step += 1
+            # Decode the observation frame and update proprioceptive state
+            self._parse_images_from_resp(resp)
+            current_obs = self._current_images["primary"]
+            if "state" in resp:
+                self._current_state = resp["state"]
+            if "state_dict" in resp:
+                self._current_state_dict = resp["state_dict"]
+            frames.append(_image_to_numpy(current_obs))
+            step += 1
 
-                # Check for task success (early termination)
-                done = resp.get("done", False)
-                if done:
-                    logger.info("Environment signaled done at step %d", step)
-                    break
+            # Check for task success (early termination)
+            done = resp.get("done", False)
+            if done:
+                logger.info("Environment signaled done at step %d", step)
+                break
 
         # Update current image to final observation
         if frames:
@@ -617,6 +974,10 @@ class SimWrapper(BaseWorldStub):
                 configuration for the current episode (not always index 0).
                 RoboCasa and RoboTwin ignore this field.
         """
+        # Clear the local action buffer so no stale actions from the previous
+        # episode bleed into the new one.
+        self._action_buffer.clear()
+
         # Reset the VLA policy's internal state (best-effort; not all servers
         # implement /reset and it's a no-op when n_action_steps=1 anyway).
         try:
