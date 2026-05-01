@@ -531,6 +531,13 @@ class TestSubprocessCmd:
         record_n_idx = cmd.index("--record-video-n") + 1
         assert cmd[record_n_idx] == "2"
 
+    def test_cmd_forwards_seed_param(self):
+        cfg = EvalConfig.from_dict({"name": "x", "params": {"seed": 42}, "output_dir": "/tmp"})
+        orch = Orchestrator(config=cfg)
+        cmd = orch._build_subprocess_cmd(0, 0)
+        seed_idx = cmd.index("--seed") + 1
+        assert cmd[seed_idx] == "42"
+
     def test_cmd_boolean_params_are_flags(self):
         cfg = EvalConfig.from_dict(
             {

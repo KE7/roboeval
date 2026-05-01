@@ -161,6 +161,8 @@ def _write_cell_config(
         if cell.max_tasks is not None:
             cfg["max_tasks"] = int(cell.max_tasks)
     cfg.setdefault("params", {})
+    cfg["record_video"] = True
+    cfg["record_video_n"] = int(cfg.get("episodes_per_task", 1))
     cfg["params"]["record_video"] = True
     cfg["params"]["record_video_n"] = int(cfg.get("episodes_per_task", 1))
     cfg["x_local_provenance"] = provenance

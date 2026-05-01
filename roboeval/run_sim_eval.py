@@ -242,6 +242,9 @@ def eval_sim(
     # Set random seeds for reproducibility
     import random as _random
 
+    if seed is None and "seed" in sim_config_dict:
+        seed = int(sim_config_dict["seed"])
+
     if seed is not None:
         _random.seed(seed)
         try:
@@ -311,6 +314,8 @@ def eval_sim(
 
     typer.echo(f"Loaded {len(task_icadirs)} prior experience entries.")
 
+    completed_episodes = 0
+    failed_before_result = 0
     for episode in range(start_episode, start_episode + max_episodes):
         typer.echo(f"\n{'=' * 60}")
         typer.echo(f"Episode {episode - start_episode + 1}/{max_episodes} (init state {episode})")
@@ -337,6 +342,7 @@ def eval_sim(
             )
         except Exception as e:
             typer.echo(f"Failed to initialize simulator (skipping episode): {e}")
+            failed_before_result += 1
             continue
 
         try:
@@ -508,16 +514,20 @@ def eval_sim(
             if assessment:
                 typer.echo(f"  Assessment: {assessment}")
             typer.echo(f"  Experience saved to: {episode_dir}")
+            completed_episodes += 1
 
         except Exception as e:
             typer.echo(f"Episode {episode - start_episode + 1} failed with error: {e}")
             import traceback as _tb
 
             typer.echo(_tb.format_exc())
+            failed_before_result += 1
         finally:
             wrapper.close()
 
     typer.echo(f"\nAll {max_episodes} episodes complete.")
+    if completed_episodes == 0 and failed_before_result:
+        raise typer.Exit(1)
 
 
 @app.command("list-tasks")
