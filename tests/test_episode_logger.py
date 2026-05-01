@@ -65,6 +65,20 @@ class TestEpisodeResult:
         assert len(ep.subtasks) == 2
         assert ep.subtasks[0] == "pick bowl"
 
+    def test_scene_metadata_and_video_path(self):
+        ep = EpisodeResult(
+            task=0,
+            episode=0,
+            success=True,
+            steps=10,
+            duration_s=1.0,
+            vla_calls=5,
+            scene_metadata={"scene_id": "scene-42"},
+            video_path="results/videos/scene-42.mp4",
+        )
+        assert ep.scene_metadata["scene_id"] == "scene-42"
+        assert ep.video_path == "results/videos/scene-42.mp4"
+
 
 # ---------------------------------------------------------------------------
 # save_episode_result
@@ -100,6 +114,8 @@ class TestSaveEpisodeResult:
         assert data["duration_s"] == 30.0
         assert data["vla_calls"] == 140
         assert data["subtasks"] == ["pick", "place"]
+        assert data["scene_metadata"] == {}
+        assert data["video_path"] is None
         assert data["timestamp"] == "2026-03-01T12:00:00"
 
     def test_creates_episodes_subdir(self, tmp_path):

@@ -224,6 +224,14 @@ def eval_sim(
         "--ema-alpha",
         help="EMA blend coefficient when --action-ensemble=ema (default 0.5).",
     ),
+    policy_instruction_override: str | None = typer.Option(
+        None,
+        "--policy-instruction-override",
+        help=(
+            "Override only the instruction sent to the VLA policy. "
+            "The simulator task instruction remains unchanged for resets, metadata, and success checks."
+        ),
+    ),
 ):
     """Run LITEN evaluation on a simulator environment."""
     # --episode overrides start_episode / max_episodes for single-episode sharded runs
@@ -325,6 +333,7 @@ def eval_sim(
                 chunk_size=chunk_size,
                 action_ensemble=action_ensemble,
                 ema_alpha=ema_alpha,
+                policy_instruction_override=policy_instruction_override,
             )
         except Exception as e:
             typer.echo(f"Failed to initialize simulator (skipping episode): {e}")
@@ -386,6 +395,27 @@ def eval_sim(
             ep_duration = time.time() - ep_start
             total_steps = sum(len(frames) for _, frames in wrapper.subtask_frame_tuples)
             subtask_names = [cmd for cmd, _ in wrapper.subtask_frame_tuples]
+            all_frames = []
+            for _, frames in wrapper.subtask_frame_tuples:
+                all_frames.extend(frames)
+
+            video_path = None
+            if record_video and (episode - start_episode) < record_video_n:
+                if all_frames and results_dir:
+                    videos_dir = os.path.join(results_dir, "videos")
+                    os.makedirs(videos_dir, exist_ok=True)
+                    prompt_slug = _slugify_filename_component(instruction)
+                    video_path = os.path.join(
+                        videos_dir,
+                        f"{suite}_task{task}_ep{episode}_{prompt_slug}.mp4",
+                    )
+                    save_episode_video(
+                        all_frames,
+                        video_path,
+                        text_overlay=instruction,
+                    )
+                    typer.echo(f"  Video saved: {video_path}")
+
             ep_result = EpisodeResult(
                 task=int(task) if str(task).isdigit() else 0,
                 episode=episode,
@@ -394,6 +424,8 @@ def eval_sim(
                 duration_s=round(ep_duration, 2),
                 vla_calls=total_steps,
                 subtasks=subtask_names,
+                scene_metadata=getattr(wrapper, "scene_metadata", {}) or {},
+                video_path=video_path,
             )
             ep_results_dir = results_dir
             if not ep_results_dir:
@@ -466,33 +498,10 @@ def eval_sim(
 
             # Save rollout video through the shared helper.
             if save_videos:
-                all_frames = []
-                for _, frames in wrapper.subtask_frame_tuples:
-                    all_frames.extend(frames)
                 if all_frames:
                     prompt_slug = _slugify_filename_component(instruction)
                     video_name = f"{sim}_{task}_{prompt_slug}_{timestamp}"
                     save_video(all_frames, video_name)
-
-            # Save structured episode video to results_dir/videos/
-            if record_video and (episode - start_episode) < record_video_n:
-                all_frames = []
-                for _, frames in wrapper.subtask_frame_tuples:
-                    all_frames.extend(frames)
-                if all_frames and results_dir:
-                    videos_dir = os.path.join(results_dir, "videos")
-                    os.makedirs(videos_dir, exist_ok=True)
-                    prompt_slug = _slugify_filename_component(instruction)
-                    video_path = os.path.join(
-                        videos_dir,
-                        f"{suite}_task{task}_ep{episode}_{prompt_slug}.mp4",
-                    )
-                    save_episode_video(
-                        all_frames,
-                        video_path,
-                        text_overlay=instruction,
-                    )
-                    typer.echo(f"  Video saved: {video_path}")
 
             typer.echo(f"Episode {episode + 1} complete.")
             typer.echo(f"  Simulator success: {sim_success}")

@@ -132,12 +132,16 @@ run all four LIBERO-Infinity suites.
 | `max_distractors` | `int` | — | Maximum number of distractor objects to add |
 | `min_distractors` | `int` | — | Minimum number of distractor objects |
 | `max_steps` | `int` | `300` | Rollout horizon (overrides suite default) |
+| `max_scenic_iterations` | `int` | `1000` | Scenic rejection-sampling budget for each scene sample; raise this for hard full/multi-axis distributions |
 | `max_reset_attempts` | `int` | `5` | Max Scenic resample attempts per episode if physics settling fails |
 | `post_reset_settle_steps` | `int` | `80` | Zero-action steps to let physics settle after scene sampling |
 
 ### Examples
 
 All examples set keys in your eval YAML, then `roboeval run --config <yaml>`.
+To capture rollout videos for sampled scenes, set `record_video: true` and
+`record_video_n: <N>` in the eval YAML. Videos are written under the run's
+`videos/` results subdirectory.
 
 **Single axis, spatial suite only:**
 
@@ -173,8 +177,11 @@ suite: libero_infinity_goal
 task: "bowl"
 episodes_per_task: 20
 max_tasks: 2
+record_video: true
+record_video_n: 2
 sim_config:
   perturbation: full
+  max_scenic_iterations: 25000
   max_distractors: 5
 ```
 

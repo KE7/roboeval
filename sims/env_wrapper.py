@@ -322,11 +322,13 @@ class SimWrapper(BaseWorldStub):
         chunk_size: int = None,
         action_ensemble: str = "newest",
         ema_alpha: float = 0.5,
+        policy_instruction_override: str | None = None,
     ):
         self.sim_server_url = sim_server_url.rstrip("/")
         self._sim_config = normalize_libero_infinity_sim_config(sim_name, sim_config)
         self.vla_server_url = vla_server_url.rstrip("/")
         self._no_vlm = no_vlm
+        self._policy_instruction_override = policy_instruction_override
         self.sim_name = sim_name
         self.task_name = task_name
         self.camera_resolution = camera_resolution
@@ -347,6 +349,7 @@ class SimWrapper(BaseWorldStub):
         self._current_state: list = []  # latest robot proprioceptive state (list[float])
         # Role-keyed dict of camera images (e.g. "primary", "wrist", "secondary")
         self._current_images: dict = {}  # role -> PIL.Image.Image
+        self.scene_metadata: dict = {}
 
         # Policy info from /info endpoint; sim expected action space from lookup table
         self._policy_info: dict = {}
@@ -890,6 +893,11 @@ class SimWrapper(BaseWorldStub):
             command: Natural-language instruction describing the subtask.
         """
         logger.info("Executing subtask: '%s'", command)
+        policy_instruction = (
+            self._policy_instruction_override
+            if self._policy_instruction_override is not None
+            else command
+        )
 
         # Check VLA reachability once at the start; refresh policy info if not yet loaded
         try:
@@ -932,7 +940,7 @@ class SimWrapper(BaseWorldStub):
                 try:
                     chunk = self._get_vla_actions(
                         current_obs,
-                        command,
+                        policy_instruction,
                         state=self._current_state or None,
                     )
                     self._validate_action_chunk(chunk, expected_dim=self.action_dim)
@@ -1063,6 +1071,7 @@ class SimWrapper(BaseWorldStub):
                 self._current_state = resp["state"]
             if "state_dict" in resp:
                 self._current_state_dict = resp["state_dict"]
+            self.scene_metadata = resp.get("scene_metadata", {})
         else:
             # Backend doesn't return an image on reset (e.g. RoboTwin) — fetch separately.
             self.current_image = self._get_obs_image()

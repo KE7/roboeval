@@ -62,6 +62,9 @@ class TestEvalConfig:
             "no_vlm": False,
             "vlm_model": "gpt-4",
             "delta_actions": False,
+            "policy_instruction_override": "",
+            "record_video": True,
+            "record_video_n": 2,
             "output_dir": "/tmp/test_out",
             "params": {"seed": 42},
         }
@@ -71,6 +74,9 @@ class TestEvalConfig:
         assert cfg.episodes_per_task == 5
         assert cfg.no_vlm is False
         assert cfg.vlm_model == "gpt-4"
+        assert cfg.policy_instruction_override == ""
+        assert cfg.record_video is True
+        assert cfg.record_video_n == 2
         assert cfg.params == {"seed": 42}
 
     def test_to_dict_round_trip(self):
@@ -494,6 +500,52 @@ class TestSubprocessCmd:
         assert "--no-vlm" not in cmd
         assert "--vlm-model" in cmd
         assert "gpt-4o" in cmd
+
+    def test_cmd_preserves_empty_policy_instruction_override(self):
+        cfg = EvalConfig.from_dict(
+            {"name": "x", "policy_instruction_override": "", "output_dir": "/tmp"}
+        )
+        orch = Orchestrator(config=cfg)
+        cmd = orch._build_subprocess_cmd(0, 0)
+        override_idx = cmd.index("--policy-instruction-override") + 1
+        assert cmd[override_idx] == ""
+
+    def test_cmd_forwards_record_video_config(self):
+        cfg = EvalConfig.from_dict(
+            {"name": "x", "record_video": True, "record_video_n": 2, "output_dir": "/tmp"}
+        )
+        orch = Orchestrator(config=cfg)
+        cmd = orch._build_subprocess_cmd(0, 0)
+        assert "--record-video" in cmd
+        record_n_idx = cmd.index("--record-video-n") + 1
+        assert cmd[record_n_idx] == "2"
+
+    def test_cmd_params_true_bool_forward_as_flag(self):
+        cfg = EvalConfig.from_dict(
+            {"name": "x", "params": {"record_video": True, "record_video_n": 2}, "output_dir": "/tmp"}
+        )
+        orch = Orchestrator(config=cfg)
+        cmd = orch._build_subprocess_cmd(0, 0)
+        assert "--record-video" in cmd
+        assert "True" not in cmd
+        record_n_idx = cmd.index("--record-video-n") + 1
+        assert cmd[record_n_idx] == "2"
+
+    def test_cmd_boolean_params_are_flags(self):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "x",
+                "output_dir": "/tmp",
+                "params": {"record_video": True, "save_videos": False, "record_video_n": 2},
+            }
+        )
+        orch = Orchestrator(config=cfg)
+        cmd = orch._build_subprocess_cmd(0, 0)
+        assert "--record-video" in cmd
+        assert "True" not in cmd
+        assert "--save-videos" not in cmd
+        record_n_idx = cmd.index("--record-video-n") + 1
+        assert cmd[record_n_idx] == "2"
 
     def test_cmd_vla_url_in_env(self):
         cfg = EvalConfig.from_dict(

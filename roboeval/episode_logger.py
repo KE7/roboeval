@@ -19,6 +19,8 @@ class EpisodeResult:
     duration_s: float
     vla_calls: int
     subtasks: list[str] = field(default_factory=list)
+    scene_metadata: dict = field(default_factory=dict)
+    video_path: str | None = None
     timestamp: str = ""
 
     def __post_init__(self):

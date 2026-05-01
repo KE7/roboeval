@@ -84,6 +84,11 @@ class EvalConfig:
 
     # Action
     delta_actions: bool = True
+    policy_instruction_override: str | None = None
+
+    # Video capture
+    record_video: bool = False
+    record_video_n: int = 3
 
     # Python executable for subprocess launch
     eval_python: str = ""
@@ -116,6 +121,9 @@ class EvalConfig:
         cfg.vlm_model = d.get("vlm_model", None)
         cfg.vlm_endpoint = d.get("vlm_endpoint", "localhost:4000")
         cfg.delta_actions = bool(d.get("delta_actions", True))
+        cfg.policy_instruction_override = d.get("policy_instruction_override", None)
+        cfg.record_video = bool(d.get("record_video", False))
+        cfg.record_video_n = int(d.get("record_video_n", 3))
         cfg.eval_python = d.get("eval_python", "")
         cfg.output_dir = d.get("output_dir", "./results")
         cfg.params = d.get("params", {})
@@ -151,6 +159,9 @@ class EvalConfig:
             "vlm_model": self.vlm_model,
             "vlm_endpoint": self.vlm_endpoint,
             "delta_actions": self.delta_actions,
+            "policy_instruction_override": self.policy_instruction_override,
+            "record_video": self.record_video,
+            "record_video_n": self.record_video_n,
             "eval_python": self.eval_python,
             "output_dir": self.output_dir,
             "params": self.params,
@@ -461,6 +472,12 @@ class Orchestrator:
         if cfg.delta_actions:
             cmd.append("--delta-actions")
 
+        if cfg.policy_instruction_override is not None:
+            cmd += ["--policy-instruction-override", cfg.policy_instruction_override]
+
+        if cfg.record_video:
+            cmd += ["--record-video", "--record-video-n", str(cfg.record_video_n)]
+
         if cfg.vlm_endpoint:
             cmd += ["--vlm-endpoint", cfg.vlm_endpoint]
 
@@ -475,9 +492,17 @@ class Orchestrator:
                     yaml.safe_dump(cfg.sim_config, f, sort_keys=True)
             cmd += ["--sim-config", sim_config_path]
 
-        # Forward any extra params
+        # Forward any extra params. Boolean true values map to Typer flags such
+        # as --record-video; false/null values are omitted.
         for k, v in cfg.params.items():
-            cmd += [f"--{k.replace('_', '-')}", str(v)]
+            flag = f"--{k.replace('_', '-')}"
+            if isinstance(v, bool):
+                if v:
+                    cmd.append(flag)
+                continue
+            if v is None:
+                continue
+            cmd += [flag, str(v)]
 
         return cmd
 
@@ -564,6 +589,7 @@ class Orchestrator:
                 "steps": steps,
                 "elapsed_sec": round(elapsed, 2),
             }
+            self._attach_video_artifacts(result, suite or cfg.suite, task_id, episode)
             return result
 
         # Fallback: parse success from stdout
@@ -575,7 +601,26 @@ class Orchestrator:
             "steps": steps,
             "elapsed_sec": round(elapsed, 2),
         }
+        self._attach_video_artifacts(result, suite or cfg.suite, task_id, episode)
         return result
+
+    def _attach_video_artifacts(
+        self,
+        result: dict[str, Any],
+        suite: str,
+        task_id: int | str,
+        episode: int,
+    ) -> None:
+        """Attach recorded video artifact metadata to an episode result."""
+        if not self.config.record_video:
+            return
+        videos_dir = self._output_dir / "videos"
+        paths = sorted(videos_dir.glob(f"{suite}_task{task_id}_ep{episode}_*.mp4"))
+        result["video"] = {
+            "expected": True,
+            "paths": [str(path) for path in paths],
+            "artifact_present": any(path.is_file() and path.stat().st_size > 0 for path in paths),
+        }
 
     def _read_episode_json(
         self, suite: str, task_id: int | str, episode: int

@@ -1,0 +1,55 @@
+# Example queue manifest for scripts/run_libero_infinity_gb10_queue.py.
+# Run pilots first:
+#   python3 scripts/run_libero_infinity_gb10_queue.py --manifest configs/libero_infinity_gb10_queue.example.yaml --mode pilot
+#
+# Conservative GB10 policy:
+#   - nvidia-smi reports GB10 utilization but memory fields are N/A.
+#   - Use pilot_metrics.json peak PSS/RSS plus MemAvailable delta.
+#   - Keep --max-parallel 1 until measured peaks leave at least 32 GiB
+#     MemAvailable after projecting concurrent cells.
+
+provenance:
+  privacy: local-only-no-push-no-tag-no-publication
+  roboeval_owner: harness/config/orchestration/video/result plumbing
+  libero_infinity_owner: generator/compiler/Scenic/runtime perturbation fixes
+  # Optional: set this to a local private libero-infinity checkout if a pilot
+  # depends on generator/compiler/runtime fixes outside roboeval.
+  # libero_infinity_worktree: /path/to/libero-infinity
+
+cells:
+  - name: exp1_position
+    config: configs/libero_infinity_pi05_smoke.yaml
+    suite: libero_infinity_goal
+    perturbation: position
+    episodes_per_task: 10
+    max_tasks: 1
+
+  - name: exp1_articulation
+    config: configs/libero_infinity_pi05_smoke.yaml
+    suite: libero_infinity_goal
+    perturbation: articulation
+    episodes_per_task: 10
+    max_tasks: 1
+
+  - name: exp1_position_articulation
+    config: configs/libero_infinity_pi05_smoke.yaml
+    suite: libero_infinity_goal
+    perturbation:
+      - position
+      - articulation
+    episodes_per_task: 10
+    max_tasks: 1
+
+  - name: exp3_combined
+    config: configs/libero_infinity_pi05_smoke.yaml
+    suite: libero_infinity_spatial,libero_infinity_goal
+    perturbation: combined
+    episodes_per_task: 10
+    max_tasks: 2
+
+  - name: exp3_full
+    config: configs/libero_infinity_pi05_smoke.yaml
+    suite: libero_infinity_spatial,libero_infinity_goal
+    perturbation: full
+    episodes_per_task: 10
+    max_tasks: 2

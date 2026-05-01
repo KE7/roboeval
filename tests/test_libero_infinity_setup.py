@@ -17,6 +17,7 @@ Coverage:
 
 from __future__ import annotations
 
+import contextlib
 import pathlib
 import sys
 import tempfile
@@ -272,6 +273,71 @@ class TestLiberoInfinityPerturbationConfig(unittest.TestCase):
         bddl_path.unlink(missing_ok=True)
         return seen
 
+    def _backend_for_reset_budget(self, max_scenic_iterations=None):
+        seen = {}
+
+        class FakeScenario:
+            def generate(self, **kwargs):
+                seen["generate_kwargs"] = kwargs
+                return types.SimpleNamespace(params={}), None
+
+        class FakeBddlContext:
+            def __enter__(self):
+                return "/tmp/effective.bddl"
+
+            def __exit__(self, exc_type, exc, tb):
+                seen["bddl_exited"] = True
+
+        class FakeSimulation:
+            last_obs = {}
+
+            def setup(self):
+                seen["setup"] = True
+
+            def destroy(self):
+                seen["destroyed"] = True
+
+        class FakeSimulator:
+            def __init__(self, bddl_path, env_kwargs):
+                seen["simulator_bddl_path"] = bddl_path
+                seen["simulator_env_kwargs"] = env_kwargs
+
+            def createSimulation(self, scene, maxSteps, verbosity):
+                seen["maxSteps"] = maxSteps
+                seen["verbosity"] = verbosity
+                return FakeSimulation()
+
+        backend = LiberoInfinityBackend()
+        backend._scenario = FakeScenario()
+        backend._bddl_path = "/tmp/source.bddl"
+        backend._orig_obj_classes = {}
+        backend._env_kwargs = {"camera_heights": 64}
+        backend._max_steps = 300
+        backend._run_seed = 42
+        backend._max_reset_attempts = 1
+        if max_scenic_iterations is not None:
+            backend._max_scenic_iterations = max_scenic_iterations
+
+        bddl_preprocessor_mod = sys.modules["libero_infinity.bddl_preprocessor"]
+        simulator_mod = sys.modules["libero_infinity.simulator"]
+
+        patches = (
+            mock.patch.object(
+                bddl_preprocessor_mod,
+                "bddl_for_scene",
+                return_value=FakeBddlContext(),
+                create=True,
+            ),
+            mock.patch.object(simulator_mod, "LIBEROSimulator", FakeSimulator, create=True),
+            mock.patch.object(LiberoInfinityBackend, "_post_reset_settle", return_value=None),
+            mock.patch.object(
+                LiberoInfinityBackend,
+                "_extract_images",
+                return_value=("primary", "wrist"),
+            ),
+        )
+        return backend, seen, patches
+
     def test_scalar_axis_position_is_forwarded(self):
         seen = self._init_with_perturbation("position")
         self.assertEqual(seen["perturbation"], "position")
@@ -301,6 +367,90 @@ class TestLiberoInfinityPerturbationConfig(unittest.TestCase):
         seen = self._init_with_perturbation("combined")
         self.assertEqual(seen["perturbation"], self.COMBINED_AXIS_STRING)
         self.assertEqual(seen["kwargs"]["max_distractors"], 3)
+
+    def test_max_scenic_iterations_defaults_to_existing_budget(self):
+        backend = LiberoInfinityBackend()
+        self.assertEqual(backend._max_scenic_iterations, 1000)
+
+    def test_max_scenic_iterations_loaded_from_sim_config(self):
+        scenic_path = pathlib.Path(tempfile.gettempdir()) / "roboeval_li_budget_test.scenic"
+        scenic_path.write_text("# test scenic\n", encoding="utf-8")
+        bddl_path = pathlib.Path(tempfile.gettempdir()) / "roboeval_li_budget_test.bddl"
+        bddl_path.write_text("(define (problem test))\n", encoding="utf-8")
+
+        class FakeTaskConfig:
+            language = "test task"
+
+            @classmethod
+            def from_bddl(cls, path):
+                return cls()
+
+        task_config_mod = sys.modules["libero_infinity.task_config"]
+        compiler_mod = sys.modules["libero_infinity.compiler"]
+        bddl_preprocessor_mod = sys.modules["libero_infinity.bddl_preprocessor"]
+        scenic_mod = sys.modules["scenic"]
+
+        try:
+            with (
+                mock.patch.object(
+                    LiberoInfinityBackend,
+                    "_resolve_bddl_path",
+                    return_value=str(bddl_path),
+                ),
+                mock.patch.object(LiberoInfinityBackend, "reset", return_value=(None, None)),
+                mock.patch.object(task_config_mod, "TaskConfig", FakeTaskConfig, create=True),
+                mock.patch.object(
+                    compiler_mod,
+                    "generate_scenic_file",
+                    return_value=str(scenic_path),
+                    create=True,
+                ),
+                mock.patch.object(
+                    bddl_preprocessor_mod,
+                    "parse_object_classes",
+                    return_value={},
+                    create=True,
+                ),
+                mock.patch.object(
+                    scenic_mod,
+                    "scenarioFromFile",
+                    return_value=types.SimpleNamespace(generate=lambda **kwargs: (object(), None)),
+                    create=True,
+                ),
+            ):
+                backend = LiberoInfinityBackend()
+                backend.init(
+                    task_name="0",
+                    camera_resolution=128,
+                    suite="libero_infinity_spatial",
+                    sim_config={"max_scenic_iterations": 25000},
+                )
+
+            self.assertEqual(backend._max_scenic_iterations, 25000)
+        finally:
+            scenic_path.unlink(missing_ok=True)
+            bddl_path.unlink(missing_ok=True)
+
+    def test_reset_passes_max_scenic_iterations_to_scenic_generate(self):
+        backend, seen, patches = self._backend_for_reset_budget(max_scenic_iterations=25000)
+
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            self.assertEqual(backend.reset(episode_index=3), ("primary", "wrist"))
+
+        self.assertEqual(seen["generate_kwargs"]["maxIterations"], 25000)
+        self.assertEqual(seen["generate_kwargs"]["verbosity"], 0)
+
+    def test_reset_uses_default_scenic_iteration_budget(self):
+        backend, seen, patches = self._backend_for_reset_budget()
+
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            backend.reset(episode_index=3)
+
+        self.assertEqual(seen["generate_kwargs"]["maxIterations"], 1000)
 
     def test_combined_legacy_preset_normalizes_without_heavy_imports(self):
         self.assertEqual(
@@ -495,11 +645,16 @@ class TestLiberoInfinitySimConfigForwarding(unittest.TestCase):
                 task_name="0",
                 suite="libero_infinity_spatial",
                 no_vlm=True,
-                sim_config={"perturbation": "all_axes", "seed": 123},
+                sim_config={
+                    "perturbation": "all_axes",
+                    "seed": 123,
+                    "max_scenic_iterations": 25000,
+                },
             )
 
         self.assertEqual(captured["/init"]["sim_config"]["perturbation"], "full")
         self.assertEqual(captured["/init"]["sim_config"]["seed"], 123)
+        self.assertEqual(captured["/init"]["sim_config"]["max_scenic_iterations"], 25000)
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +784,10 @@ class TestLiberoInfinitySmokeConfig(unittest.TestCase):
                 _cfg, data = self._load_config(name)
                 self.assertEqual(data["sim_config"]["perturbation"], expected)
 
+    def test_full_perturb_config_uses_larger_scenic_budget(self):
+        _cfg, data = self._load_config("libero_infinity_pi05_full_perturb_smoke.yaml")
+        self.assertEqual(data["sim_config"]["max_scenic_iterations"], 25000)
+
     def test_examples_cover_suite_and_task_subset_selection(self):
         _cfg, spatial = self._load_config("libero_infinity_pi05_smoke.yaml")
         self.assertEqual(spatial["suite"], "libero_infinity_spatial")
@@ -683,6 +842,10 @@ class TestLiberoInfinityDocs(unittest.TestCase):
             self.assertIn("full", normalized)
             self.assertIn("all nine axes", normalized)
             self.assertIn("not forced to run all four", normalized)
+
+    def test_libero_doc_mentions_scenic_iteration_budget(self):
+        self.assertIn("`max_scenic_iterations`", self.libero_doc)
+        self.assertIn("25000", self.libero_doc)
 
 
 if __name__ == "__main__":

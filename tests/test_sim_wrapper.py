@@ -54,7 +54,10 @@ def test_act_uses_reset_observation_for_first_vla_call(monkeypatch):
         if path == "/init":
             return {"success": True, "task_description": "demo task"}
         if path == "/reset":
-            return {"image": _encode_image(reset_img)}
+            return {
+                "image": _encode_image(reset_img),
+                "scene_metadata": {"scene_id": "scene-42"},
+            }
         if path == "/step":
             return {"image": _encode_image(step_img), "done": True}
         raise AssertionError(f"unexpected POST {path}")
@@ -73,6 +76,7 @@ def test_act_uses_reset_observation_for_first_vla_call(monkeypatch):
         no_vlm=True,
     )
     wrapper.physical_reset()
+    assert wrapper.scene_metadata == {"scene_id": "scene-42"}
 
     def fail_get_obs():
         raise AssertionError("act() should use the reset image directly")
@@ -93,3 +97,64 @@ def test_act_uses_reset_observation_for_first_vla_call(monkeypatch):
 
     assert np.array_equal(captured["image"], np.array(reset_img))
     assert captured["instruction"] == "pick up the bowl"
+
+
+def test_policy_instruction_override_only_changes_vla_request(monkeypatch):
+    init_img = Image.fromarray(np.full((8, 8, 3), 10, dtype=np.uint8))
+    step_img = Image.fromarray(np.full((8, 8, 3), 30, dtype=np.uint8))
+
+    def fake_world_init(self, initial_image=None, task_instruction=None):
+        self.subtask_frame_tuples = []
+        self.eval_len = 0
+        self.current_image = initial_image
+        self.task_instruction = task_instruction
+        self.manipulable_object_uids = []
+        self.execution_trace = None
+
+    def fake_fetch_policy_info(self):
+        self._policy_info = {"model_id": "fake"}
+        self._policy_action_space = {"type": "eef_delta", "dim": 7}
+
+    def fake_fetch_sim_info(self):
+        self._sim_info = {
+            "sim": "libero_infinity",
+            "action_space": {"type": "eef_delta", "dim": 7},
+            "obs_space": {"cameras": [{"role": "primary"}], "state": {"dim": 8}},
+        }
+        self._sim_action_space = self._sim_info["action_space"]
+
+    def fake_post(self, path, json_data=None):
+        if path == "/init":
+            return {"success": True, "task_description": "real task language"}
+        if path == "/step":
+            return {"image": _encode_image(step_img), "done": True}
+        raise AssertionError(f"unexpected POST {path}")
+
+    monkeypatch.setattr(BaseWorldStub, "__init__", fake_world_init)
+    monkeypatch.setattr(SimWrapper, "_fetch_policy_info", fake_fetch_policy_info)
+    monkeypatch.setattr(SimWrapper, "_fetch_sim_info", fake_fetch_sim_info)
+    monkeypatch.setattr(SimWrapper, "_post", fake_post)
+    monkeypatch.setattr(SimWrapper, "_get_obs_image", lambda self: init_img)
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: _DummyResponse())
+
+    wrapper = SimWrapper(
+        sim_server_url="http://fake-sim",
+        sim_name="libero_infinity",
+        task_name="0",
+        no_vlm=True,
+        policy_instruction_override="",
+    )
+
+    captured = {}
+
+    def fake_get_vla_actions(image, instruction, state=None):
+        captured["instruction"] = instruction
+        return [[0.0] * 7]
+
+    monkeypatch.setattr(wrapper, "_get_vla_actions", fake_get_vla_actions)
+
+    wrapper.act("pick up the bowl")
+
+    assert wrapper.task_instruction == "real task language"
+    assert captured["instruction"] == ""
+    assert wrapper.subtask_frame_tuples[0][0] == "pick up the bowl"

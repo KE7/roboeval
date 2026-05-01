@@ -1,0 +1,45 @@
+# NeurIPS 2026 Experiment 4 pilot: language counterfactual.
+#
+# Purpose:
+#   Reuse the Exp2-style LIBERO-Infinity spatial combined scene distribution
+#   with seed 42, but send an empty instruction string only to the VLA policy.
+#   The simulator task instruction is still used for task setup, metadata, and
+#   success checks.
+#
+# Usage:
+#   roboeval serve --vla pi05 --sim libero_infinity --headless &
+#   roboeval run -c configs/neurips2026_exp4_language_counterfactual_pilot.yaml
+#
+# PM gate:
+#   Keep this as a tiny pilot. Do not raise episodes_per_task to 200 without PM approval.
+
+name: neurips2026_exp4_language_counterfactual_pilot
+
+vla: pi05
+vla_url: http://localhost:5100
+
+sim: libero_infinity
+sim_url: http://localhost:5308
+suite: libero_infinity_spatial
+task: ""
+
+episodes_per_task: 2
+max_tasks: 1
+episode_timeout_seconds: 1800
+
+delta_actions: true
+no_vlm: true
+policy_instruction_override: ""
+record_video: true
+record_video_n: 2
+
+eval_python: ""
+output_dir: results/neurips2026/exp4/pilot
+
+params:
+  record_video: true
+  record_video_n: 2
+
+sim_config:
+  perturbation: combined
+  seed: 42

@@ -29,6 +29,9 @@ params: {}
 
 sim_config:
   perturbation: full
+  # Full-axis Scenic scenes can need a larger rejection-sampling budget than
+  # the backend default of 1000.
+  max_scenic_iterations: 25000
   seed: 42
   min_distractors: 1
   max_distractors: 5

@@ -1383,7 +1383,9 @@ class LiberoInfinityBackend(LiberoBackend):
         self._run_seed = 42  # base seed for deterministic episode seeding
         self._ep_idx = 0  # auto-incrementing episode counter
         self._last_obs: dict = {}  # cache last obs dict for state extraction
+        self._last_scene_metadata: dict = {}
         self._max_reset_attempts = 5
+        self._max_scenic_iterations = 1000
         self._post_reset_settle_steps = 80
         self._post_reset_stable_steps = 10
         self._post_reset_pos_tol = 0.002
@@ -1578,6 +1580,7 @@ class LiberoInfinityBackend(LiberoBackend):
                 perturbation  (str)  — default "position"
                 max_steps     (int)  — default 300
                 seed          (int)  — base RNG seed, default 42
+                max_scenic_iterations (int) — Scenic rejection-sampling budget, default 1000
                 max_distractors (int)
                 min_distractors (int)
         """
@@ -1589,6 +1592,10 @@ class LiberoInfinityBackend(LiberoBackend):
         self._max_steps = sim_config.get("max_steps", 300)
         self._run_seed = sim_config.get("seed", 42)
         self._max_reset_attempts = max(1, int(sim_config.get("max_reset_attempts", 5)))
+        self._max_scenic_iterations = max(
+            1,
+            int(sim_config.get("max_scenic_iterations", 1000)),
+        )
         self._post_reset_settle_steps = max(0, int(sim_config.get("post_reset_settle_steps", 80)))
         self._post_reset_stable_steps = max(1, int(sim_config.get("post_reset_stable_steps", 10)))
         self._post_reset_pos_tol = float(sim_config.get("post_reset_pos_tol", 0.002))
@@ -1716,7 +1723,10 @@ class LiberoInfinityBackend(LiberoBackend):
 
             try:
                 # Sample a scene from the compiled Scenic scenario
-                scene, _ = self._scenario.generate(maxIterations=1000, verbosity=0)
+                scene, _ = self._scenario.generate(
+                    maxIterations=self._max_scenic_iterations,
+                    verbosity=0,
+                )
                 self._adapt_scene_params(scene)
 
                 # Open the BDDL context manager manually so the temp file stays alive
@@ -1732,6 +1742,21 @@ class LiberoInfinityBackend(LiberoBackend):
 
                 obs = self._sim.last_obs or {}
                 self._last_obs = obs
+                self._last_scene_metadata = {
+                    "scene_id": (
+                        f"libero_infinity:{pathlib.Path(self._bddl_path).stem}:"
+                        f"{self._perturbation}:{self._run_seed}:{ep_idx}:{attempt}:{seed_i}"
+                    ),
+                    "sim": "libero_infinity",
+                    "bddl_path": self._bddl_path,
+                    "bddl_stem": pathlib.Path(self._bddl_path).stem,
+                    "perturbation": self._perturbation,
+                    "run_seed": self._run_seed,
+                    "episode_index": ep_idx,
+                    "reset_attempt": attempt,
+                    "scenic_seed": seed_i,
+                    "scenic_seed_formula": "sha256(run_seed:episode_index:attempt) % 2**31",
+                }
                 return self._extract_images(obs)
             except RuntimeError as exc:
                 if "Invalid Scenic sample after MuJoCo settling" not in str(exc):
@@ -1755,6 +1780,10 @@ class LiberoInfinityBackend(LiberoBackend):
                 f"{last_exc} (after {self._max_reset_attempts} Scenic resample attempts)"
             ) from last_exc
         raise RuntimeError("failed to reset LIBERO-Infinity scene")
+
+    def get_scene_metadata(self) -> dict:
+        """Return deterministic metadata for pairing LIBERO-Infinity rollouts."""
+        return dict(self._last_scene_metadata)
 
     def step(self, action):
         """Execute one action step.
@@ -3466,6 +3495,10 @@ def reset_env(req: ResetRequest | None = None):
             state_dict = backend.get_state_dict()
             if state_dict:
                 resp["state_dict"] = state_dict
+        if hasattr(backend, "get_scene_metadata"):
+            scene_metadata = backend.get_scene_metadata()
+            if scene_metadata:
+                resp["scene_metadata"] = scene_metadata
         return resp
     except Exception as e:
         return JSONResponse(
