@@ -239,7 +239,29 @@ def eval_sim(
         start_episode = episode
         max_episodes = 1
 
-    # Set random seeds for reproducibility
+    if sim not in VALID_SIMS:
+        typer.echo(f"Error: --sim must be one of {VALID_SIMS}")
+        raise typer.Exit(1)
+
+    # Load optional simulator configuration.
+    import yaml
+
+    if sim_config:
+        try:
+            with open(sim_config) as _f:
+                sim_config_dict = yaml.safe_load(_f) or {}
+        except FileNotFoundError:
+            typer.echo(f"Error: sim config file not found: {sim_config}")
+            raise typer.Exit(1) from None
+        except yaml.YAMLError as e:
+            typer.echo(f"Error: failed to parse sim config YAML: {e}")
+            raise typer.Exit(1) from e
+    else:
+        sim_config_dict = {}
+
+    # Set random seeds for reproducibility. If the CLI seed is omitted but the
+    # simulator config specifies one, preserve that value instead of generating
+    # an unrelated run seed.
     import random as _random
 
     if seed is None and "seed" in sim_config_dict:
@@ -264,26 +286,6 @@ def eval_sim(
         except ImportError:
             pass
         typer.echo(f"Generated random seed: {seed}")
-
-    if sim not in VALID_SIMS:
-        typer.echo(f"Error: --sim must be one of {VALID_SIMS}")
-        raise typer.Exit(1)
-
-    # Load optional simulator configuration.
-    import yaml
-
-    if sim_config:
-        try:
-            with open(sim_config) as _f:
-                sim_config_dict = yaml.safe_load(_f) or {}
-        except FileNotFoundError:
-            typer.echo(f"Error: sim config file not found: {sim_config}")
-            raise typer.Exit(1) from None
-        except yaml.YAMLError as e:
-            typer.echo(f"Error: failed to parse sim config YAML: {e}")
-            raise typer.Exit(1) from e
-    else:
-        sim_config_dict = {}
 
     # Forward the run-level seed into simulator configuration.
     sim_config_dict["seed"] = seed
