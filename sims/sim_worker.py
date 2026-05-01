@@ -25,6 +25,7 @@ import argparse
 import base64
 import hashlib
 import logging
+import math
 import os
 import pathlib
 import signal
@@ -1417,6 +1418,8 @@ class LiberoInfinityBackend(LiberoBackend):
         "all_axes": _PERTURBATION_AXIS_ORDER,
         "all-axes": _PERTURBATION_AXIS_ORDER,
     }
+    _LIBERO_INFINITY_CAMERA_OFFSET_SCALE_M = 0.575
+    _LIBERO_INFINITY_CAMERA_DISTANCE_SCALE_M = 1.0
 
     @classmethod
     def _normalize_perturbation(cls, value) -> str:
@@ -1484,6 +1487,77 @@ class LiberoInfinityBackend(LiberoBackend):
         ordered = [axis for axis in cls._PERTURBATION_AXIS_ORDER if axis in expanded]
         ordered.extend(sorted(expanded.difference(ordered)))
         return ",".join(ordered)
+
+    @classmethod
+    def _perturbation_axes(cls, value: str) -> set[str]:
+        """Return the normalized active LIBERO-Infinity perturbation axes."""
+        return {axis for axis in cls._normalize_perturbation(value).split(",") if axis}
+
+    @staticmethod
+    def _strip_inactive_articulation_params(scenic_path: str, active_axes: set[str]) -> None:
+        """Remove articulation params generated for reachability when axis is inactive.
+
+        Current LIBERO-Infinity planning always emits articulation safety plans,
+        but its simulator treats any sampled ``articulation_*`` param as a
+        perturbation to apply. roboeval only applies those params when the user
+        explicitly requests the articulation axis.
+        """
+        if "articulation" in active_axes:
+            return
+        path = pathlib.Path(scenic_path)
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return
+
+        filtered = [
+            line
+            for line in lines
+            if not line.lstrip().startswith("param articulation_")
+        ]
+        if filtered != lines:
+            path.write_text("\n".join(filtered) + "\n", encoding="utf-8")
+
+    @classmethod
+    def _runtime_supports_orbit_camera_params(cls) -> bool:
+        """Return True when the installed LIBERO-Infinity sim consumes cam_* params."""
+        try:
+            import inspect
+
+            from libero_infinity.simulator import LIBEROSimulation
+
+            source = inspect.getsource(LIBEROSimulation._apply_camera_perturbation)
+        except Exception:
+            return False
+        return "cam_azimuth" in source and "cam_distance" in source
+
+    @classmethod
+    def _adapt_scene_params(cls, scene, runtime_supports_orbit_camera: bool | None = None) -> None:
+        """Bridge upstream compiler camera params for legacy offset-only runtimes."""
+        params = getattr(scene, "params", None)
+        if not isinstance(params, dict):
+            return
+
+        # LIBERO-Infinity v0.1.1 renders camera envelopes as cam_azimuth,
+        # cam_elevation, and cam_distance. Newer runtimes consume those directly;
+        # older offset-only runtimes require a compatibility translation.
+        if runtime_supports_orbit_camera is None:
+            runtime_supports_orbit_camera = cls._runtime_supports_orbit_camera_params()
+        if runtime_supports_orbit_camera:
+            return
+
+        if "cam_azimuth" in params and "camera_x_offset" not in params:
+            params["camera_x_offset"] = (
+                math.sin(math.radians(float(params["cam_azimuth"])))
+                * cls._LIBERO_INFINITY_CAMERA_OFFSET_SCALE_M
+            )
+        if "cam_distance" in params and "camera_y_offset" not in params:
+            params["camera_y_offset"] = (
+                (float(params["cam_distance"]) - 1.0)
+                * cls._LIBERO_INFINITY_CAMERA_DISTANCE_SCALE_M
+            )
+        if "cam_elevation" in params and "camera_tilt" not in params:
+            params["camera_tilt"] = float(params["cam_elevation"])
 
     def init(
         self,
@@ -1569,6 +1643,10 @@ class LiberoInfinityBackend(LiberoBackend):
             perturbation=self._perturbation,
             **distractor_kwargs,
         )
+        self._strip_inactive_articulation_params(
+            self._scenic_path,
+            self._perturbation_axes(self._perturbation),
+        )
 
         # Compile the Scenic scenario once (expensive — involves Scenic
         # parsing + Python code generation). Reused across all resets.
@@ -1639,6 +1717,7 @@ class LiberoInfinityBackend(LiberoBackend):
             try:
                 # Sample a scene from the compiled Scenic scenario
                 scene, _ = self._scenario.generate(maxIterations=1000, verbosity=0)
+                self._adapt_scene_params(scene)
 
                 # Open the BDDL context manager manually so the temp file stays alive
                 # for the entire episode (not just until the end of this method).

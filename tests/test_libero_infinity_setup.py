@@ -340,6 +340,99 @@ class TestLiberoInfinityPerturbationConfig(unittest.TestCase):
                 compiler_mod.generate_scenic_file = old_generate
             bddl_path.unlink(missing_ok=True)
 
+    def test_articulation_params_removed_when_axis_not_requested(self):
+        scenic_path = pathlib.Path(tempfile.gettempdir()) / "roboeval_li_axis_filter.scenic"
+        scenic_path.write_text(
+            "\n".join(
+                [
+                    "param articulation_cabinet = Range(0.0, 1.0)",
+                    'param articulation_cabinet_state = "Open"',
+                    "param cam_azimuth = Range(-10.0, 10.0)",
+                    "target = 1",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        try:
+            LiberoInfinityBackend._strip_inactive_articulation_params(
+                str(scenic_path),
+                {"position", "camera"},
+            )
+            content = scenic_path.read_text(encoding="utf-8")
+            self.assertNotIn("param articulation_", content)
+            self.assertIn("param cam_azimuth", content)
+            self.assertIn("target = 1", content)
+        finally:
+            scenic_path.unlink(missing_ok=True)
+
+    def test_articulation_params_preserved_when_axis_requested(self):
+        scenic_path = pathlib.Path(tempfile.gettempdir()) / "roboeval_li_axis_keep.scenic"
+        scenic_path.write_text(
+            "param articulation_cabinet = Range(0.0, 1.0)\n",
+            encoding="utf-8",
+        )
+
+        try:
+            LiberoInfinityBackend._strip_inactive_articulation_params(
+                str(scenic_path),
+                {"position", "articulation"},
+            )
+            self.assertIn("articulation_cabinet", scenic_path.read_text(encoding="utf-8"))
+        finally:
+            scenic_path.unlink(missing_ok=True)
+
+    def test_camera_scene_params_are_adapted_to_runtime_names(self):
+        scene = types.SimpleNamespace(
+            params={
+                "cam_azimuth": 10.0,
+                "cam_elevation": -5.0,
+                "cam_distance": 1.1,
+            }
+        )
+
+        LiberoInfinityBackend._adapt_scene_params(scene, runtime_supports_orbit_camera=False)
+
+        self.assertIn("camera_x_offset", scene.params)
+        self.assertIn("camera_y_offset", scene.params)
+        self.assertEqual(scene.params["camera_tilt"], -5.0)
+        self.assertAlmostEqual(scene.params["camera_x_offset"], 0.1, places=3)
+        self.assertAlmostEqual(scene.params["camera_y_offset"], 0.1)
+
+    def test_camera_scene_params_do_not_override_runtime_names(self):
+        scene = types.SimpleNamespace(
+            params={
+                "cam_azimuth": 10.0,
+                "cam_elevation": -5.0,
+                "cam_distance": 1.1,
+                "camera_x_offset": 0.25,
+                "camera_y_offset": -0.25,
+                "camera_tilt": 3.0,
+            }
+        )
+
+        LiberoInfinityBackend._adapt_scene_params(scene, runtime_supports_orbit_camera=False)
+
+        self.assertEqual(scene.params["camera_x_offset"], 0.25)
+        self.assertEqual(scene.params["camera_y_offset"], -0.25)
+        self.assertEqual(scene.params["camera_tilt"], 3.0)
+
+    def test_camera_scene_params_not_adapted_for_orbit_runtime(self):
+        scene = types.SimpleNamespace(
+            params={
+                "cam_azimuth": 10.0,
+                "cam_elevation": -5.0,
+                "cam_distance": 1.1,
+            }
+        )
+
+        LiberoInfinityBackend._adapt_scene_params(scene, runtime_supports_orbit_camera=True)
+
+        self.assertNotIn("camera_x_offset", scene.params)
+        self.assertNotIn("camera_y_offset", scene.params)
+        self.assertNotIn("camera_tilt", scene.params)
+
 
 # ---------------------------------------------------------------------------
 # wrapper-level sim_config normalization / forwarding
