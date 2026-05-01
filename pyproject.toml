@@ -403,8 +403,9 @@ libero_infinity = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.22",
     "scenic>=3.0.0",
-    # libero-infinity itself (requires Python >=3.11). Use upstream source so
-    # the real compiler/generator with all perturbation axes is available.
+    # libero-infinity itself (requires Python >=3.11). Use upstream source and
+    # require compiler.generate_scenic_file; the legacy scenic_generator stub is
+    # intentionally unsupported because it can ignore perturbation selectors.
     "libero-infinity @ git+https://github.com/KE7/libero-infinity.git",
     # robosuite and LIBERO upstream are installed from source by `roboeval setup libero_infinity`
     # (not on PyPI; setup.sh clones and installs them into .venvs/libero_infinity)

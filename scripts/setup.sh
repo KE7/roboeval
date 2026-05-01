@@ -1291,6 +1291,32 @@ setup_libero_infinity() {
             "libero-infinity @ git+https://github.com/KE7/libero-infinity.git"
     fi
 
+    "$VENVS_DIR/libero_infinity/bin/python" - <<'PY'
+import inspect
+import sys
+
+try:
+    from libero_infinity.compiler import generate_scenic_file
+except Exception as exc:
+    raise SystemExit(
+        "libero-infinity compiler support is unavailable. "
+        "Install the real KE7/libero-infinity package; the legacy "
+        "libero_infinity.scenic_generator fallback is not supported."
+    ) from exc
+
+if not callable(generate_scenic_file):
+    raise SystemExit("libero_infinity.compiler.generate_scenic_file is not callable")
+
+params = inspect.signature(generate_scenic_file).parameters
+if "perturbation" not in params:
+    raise SystemExit(
+        "libero_infinity.compiler.generate_scenic_file does not accept "
+        "the required perturbation argument"
+    )
+
+print("libero-infinity compiler import OK", file=sys.stderr)
+PY
+
     log_info "LIBERO-Infinity venv ready."
     log_info "  Datasets must be symlinked under ~/.libero/ (see LIBERO docs)."
     log_warn "  Set MUJOCO_GL=egl for headless rendering."

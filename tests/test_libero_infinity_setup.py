@@ -49,7 +49,6 @@ def _stub_optional_modules() -> None:
         "libero_infinity.planner",
         "libero_infinity.planner.composition",
         "libero_infinity.task_config",
-        "libero_infinity.scenic_generator",
         "libero_infinity.bddl_preprocessor",
         "libero_infinity.simulator",
         "scenic",
@@ -312,6 +311,34 @@ class TestLiberoInfinityPerturbationConfig(unittest.TestCase):
     def test_unknown_axis_rejected_without_heavy_imports(self):
         with self.assertRaisesRegex(ValueError, "Unknown LIBERO-Infinity perturbation"):
             LiberoInfinityBackend._normalize_perturbation(["position", "not_an_axis"])
+
+    def test_missing_compiler_generator_fails_clearly(self):
+        bddl_path = pathlib.Path(tempfile.gettempdir()) / "roboeval_li_missing_compiler.bddl"
+        bddl_path.write_text("(define (problem test))\n", encoding="utf-8")
+
+        compiler_mod = sys.modules["libero_infinity.compiler"]
+        old_generate = getattr(compiler_mod, "generate_scenic_file", None)
+        if hasattr(compiler_mod, "generate_scenic_file"):
+            delattr(compiler_mod, "generate_scenic_file")
+
+        try:
+            with mock.patch.object(
+                LiberoInfinityBackend,
+                "_resolve_bddl_path",
+                return_value=str(bddl_path),
+            ):
+                backend = LiberoInfinityBackend()
+                with self.assertRaisesRegex(RuntimeError, "compiler support is unavailable"):
+                    backend.init(
+                        task_name="0",
+                        camera_resolution=128,
+                        suite="libero_infinity_spatial",
+                        sim_config={"perturbation": "position"},
+                    )
+        finally:
+            if old_generate is not None:
+                compiler_mod.generate_scenic_file = old_generate
+            bddl_path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------

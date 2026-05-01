@@ -1542,22 +1542,19 @@ class LiberoInfinityBackend(LiberoBackend):
         # Resolve the BDDL file path for this (suite, task_name) pair
         self._bddl_path = self._resolve_bddl_path(suite, task_name)
 
-        # Parse the BDDL to get task metadata and generate the Scenic program
+        # Parse the BDDL to get task metadata and generate the Scenic program.
+        # A real libero-infinity compiler is required so perturbation selectors
+        # cannot silently degrade to the legacy no-op scenic_generator stub.
         try:
             from libero_infinity.compiler import generate_scenic_file
-        except ImportError:
-            from libero_infinity import scenic_generator as _scenic_generator
-
-            generate_scenic_file = _scenic_generator.generate_scenic_file
-            if not getattr(_scenic_generator, "PERTURBATION_AXES", None):
-                logger.warning(
-                    "Installed libero_infinity.scenic_generator does not advertise "
-                    "perturbation axes; sim_config.perturbation=%r will be forwarded "
-                    "but may be ignored by that installed generator. Upgrade "
-                    "libero-infinity or install an editable compiler-enabled version "
-                    "for full-axis perturbations.",
-                    self._perturbation,
-                )
+        except ImportError as exc:
+            raise RuntimeError(
+                "LIBERO-Infinity compiler support is unavailable. Install the real "
+                "libero-infinity package from https://github.com/KE7/libero-infinity "
+                "or run `./scripts/setup.sh libero_infinity`; the legacy "
+                "libero_infinity.scenic_generator fallback is no longer supported "
+                "because it can ignore perturbation selectors."
+            ) from exc
         from libero_infinity.task_config import TaskConfig
 
         cfg = TaskConfig.from_bddl(self._bddl_path)
