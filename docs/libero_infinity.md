@@ -79,7 +79,7 @@ Set the suite in your config YAML:
 sim: libero_infinity
 suite: libero_infinity_spatial            # one suite
 # or comma-separated for multiple:
-# suite: libero_infinity_spatial,libero_infinity_object,libero_infinity_goal
+# suite: libero_infinity_spatial,libero_infinity_goal
 episodes_per_task: 20
 ```
 
@@ -89,22 +89,45 @@ Then `roboeval run --config configs/libero_infinity_pi05.yaml`.
 
 ## Perturbation Configuration
 
-LIBERO-Infinity supports several perturbation types controlled via the
-`sim_config` mapping in your YAML config. It is forwarded directly to
-`LiberoInfinityBackend.init()`.
+LIBERO-Infinity supports selectable perturbation axes controlled via the
+`sim_config` mapping in your YAML config. The axis selector is normalized by
+the wrapper and then forwarded to `LiberoInfinityBackend.init()`.
 
-### Perturbation Types
+Suite/task selection is independent from perturbation selection. You can run a
+single suite, a comma-separated subset of suites, a task-name filter, or a
+`max_tasks` smoke subset with any perturbation selector. Users are not forced to
+run all four LIBERO-Infinity suites.
+
+### Perturbation Axes
+
+| Axis | What varies |
+|---|---|
+| `position` | Object x/y placement within reachable task regions |
+| `object` | Object visual identity, mesh, and texture variants |
+| `robot` | Panda arm initial joint reset around the canonical start state |
+| `camera` | Agentview camera position and tilt |
+| `lighting` | MuJoCo light intensity and ambient illumination |
+| `texture` | Table or surface material texture |
+| `distractor` | Non-task clutter objects sampled with clearance constraints |
+| `background` | Wall and floor texture assets |
+| `articulation` | Initial fixture state, such as doors, drawers, or stoves |
+
+### Selector Forms
 
 | `perturbation` value | Description |
 |---|---|
-| `"position"` (default) | Randomize object positions within task-feasible regions |
-| `"combined"` | Apply multiple perturbation axes simultaneously (position + distractors) |
+| `camera` | A single named axis |
+| `[position, lighting, distractor]` | An arbitrary custom combination |
+| `position,camera` | Comma-separated custom combination, equivalent to a list |
+| `combined` | Upstream preset: position, object, robot, camera, lighting, distractor, and background |
+| `full` | all nine axes |
+| `all` or `all_axes` | Alias normalized to `full` |
 
 ### Sim-Args Reference
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `perturbation` | `str` | `"position"` | Perturbation type (see above) |
+| `perturbation` | `str` or `list[str]` | `"position"` | Perturbation axis, axis list, or preset (see above) |
 | `seed` | `int` | `42` | Base RNG seed for reproducible episode sampling |
 | `max_distractors` | `int` | — | Maximum number of distractor objects to add |
 | `min_distractors` | `int` | — | Minimum number of distractor objects |
@@ -116,16 +139,46 @@ LIBERO-Infinity supports several perturbation types controlled via the
 
 All examples set keys in your eval YAML, then `roboeval run --config <yaml>`.
 
-**Default perturbation (position only):**
+**Single axis, spatial suite only:**
 
 ```yaml
 sim: libero_infinity
 suite: libero_infinity_spatial
 episodes_per_task: 50
-# sim_config omitted → defaults to {"perturbation": "position", "seed": 42}
+max_tasks: 1
+sim_config:
+  perturbation: camera
 ```
 
-**Combined perturbations with distractors:**
+**Custom perturbation combination on selected suites:**
+
+```yaml
+sim: libero_infinity
+suite: libero_infinity_spatial,libero_infinity_goal
+episodes_per_task: 50
+max_tasks: 3
+sim_config:
+  perturbation:
+    - position
+    - lighting
+    - distractor
+  max_distractors: 3
+```
+
+**All axes/full perturbation on a task subset:**
+
+```yaml
+sim: libero_infinity
+suite: libero_infinity_goal
+task: "bowl"
+episodes_per_task: 20
+max_tasks: 2
+sim_config:
+  perturbation: full
+  max_distractors: 5
+```
+
+**Combined preset:**
 
 ```yaml
 sim: libero_infinity
@@ -133,6 +186,7 @@ suite: libero_infinity_spatial
 episodes_per_task: 50
 sim_config:
   perturbation: combined
+  min_distractors: 1
   max_distractors: 3
 ```
 
@@ -147,12 +201,12 @@ sim_config:
 
 ```yaml
 sim: libero_infinity
-suite: libero_infinity_spatial,libero_infinity_object
+suite: libero_infinity_spatial,libero_infinity_goal
 max_tasks: 3
 episodes_per_task: 2
 no_vlm: true
 sim_config:
-  perturbation: position
+  perturbation: position,camera
   seed: 42
 ```
 

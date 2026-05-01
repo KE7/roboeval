@@ -5,7 +5,8 @@
 #   roboeval run -c configs/libero_infinity_pi05_smoke.yaml
 
 # LIBERO-Infinity suites are named libero_infinity_<base> and reuse LIBERO's
-# 7-dim pd_ee_delta_pose action contract.
+# 7-dim pd_ee_delta_pose action contract. This smoke selects one perturbation
+# axis: camera viewpoint variation.
 
 name: libero_infinity_pi05_smoke
 
@@ -15,7 +16,9 @@ vla_url: http://localhost:5100
 sim: libero_infinity
 sim_url: http://localhost:5308
 suite: libero_infinity_spatial
-# LIBERO-Infinity tasks are resolved by name within the libero_infinity_spatial suite.
+# Spatial-only smoke: users are not required to run all four LIBERO-Infinity suites.
+# Tasks are resolved by name within the selected suite; empty task plus max_tasks
+# uses the first task subset selected by the runner.
 task: ""
 
 episodes_per_task: 10
@@ -30,3 +33,6 @@ eval_python: ""
 output_dir: results/libero_infinity_pi05_smoke
 
 params: {}
+
+sim_config:
+  perturbation: camera

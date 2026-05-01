@@ -37,6 +37,8 @@ rates, leaderboard-style comparisons, and run-quality claims.
 - **Server:** `roboeval serve --vla pi05 --sim libero_infinity --headless`
 - **Action contract:** 7-dimensional end-effector delta action reused from LIBERO.
 - **Observation contract:** LIBERO-compatible image, language, and state fields.
+- **Perturbations:** Supports single axes, custom axis lists, `combined`, and `full` across all nine axes: position, object, robot, camera, lighting, texture, distractor, background, and articulation.
+- **Subset selection:** Configs may target one suite, selected comma-separated suites, a task-name filter, or `max_tasks`; users are not forced to run all four LIBERO-Infinity suites.
 - **Caveats:** LIBERO-Infinity requires its separate Python environment and package discovery path; suite names use the `libero_infinity_` prefix.
 
 ## SmolVLA x LIBERO
@@ -161,6 +163,8 @@ the key YAML difference is `no_vlm: false`.
 - **Intended use:** Planner-assisted perturbation studies on LIBERO-Infinity suites.
 - **Server:** `roboeval serve --vla pi05 --sim libero_infinity --headless`
 - **Planner endpoint:** Configure `vlm_endpoint` in YAML.
+- **Perturbations:** Same single-axis, custom-combination, and `full` axis selectors as the direct pair; planner mode does not change simulator perturbation behavior.
+- **Subset selection:** Suite/task filters compose with perturbation axes, so LITEN-style runs can stay spatial-only or target selected suites/tasks.
 - **Caveats:** The planner endpoint can dominate runtime; tune VLM serving separately from the simulator.
 
 ## SmolVLA x LIBERO x LITEN

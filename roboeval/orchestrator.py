@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from roboeval.config import resolve_suites
+
 if TYPE_CHECKING:
     from roboeval.results.collector import ResultCollector
 
@@ -91,6 +93,8 @@ class EvalConfig:
 
     # Extra params forwarded to run_sim_eval.py
     params: dict[str, Any] = field(default_factory=dict)
+    # Extra simulator configuration forwarded via --sim-config.
+    sim_config: dict[str, Any] | str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> EvalConfig:
@@ -115,6 +119,7 @@ class EvalConfig:
         cfg.eval_python = d.get("eval_python", "")
         cfg.output_dir = d.get("output_dir", "./results")
         cfg.params = d.get("params", {})
+        cfg.sim_config = d.get("sim_config", None)
         return cfg
 
     @classmethod
@@ -149,6 +154,7 @@ class EvalConfig:
             "eval_python": self.eval_python,
             "output_dir": self.output_dir,
             "params": self.params,
+            "sim_config": self.sim_config,
         }
 
 
@@ -203,17 +209,21 @@ class Orchestrator:
         cfg = self.config
         safe_name = _SAFE_NAME_RE.sub("_", cfg.name)
 
-        # Build task list
-        tasks = self._build_task_list()
-        if not tasks:
-            logger.warning("No tasks to evaluate (suite=%r, tasks=%r)", cfg.suite, cfg.tasks)
+        suites = self._build_suite_list()
+        if not suites:
+            logger.warning("No suites to evaluate (suite=%r)", cfg.suite)
             return {}
 
-        # Build flat (task_id, episode) work items
-        work_items: list[tuple[int | str, int]] = []
-        for task_id in tasks:
-            for ep in range(cfg.episodes_per_task):
-                work_items.append((task_id, ep))
+        # Build flat (suite, task_id, episode) work items.
+        work_items: list[tuple[str, int | str, int]] = []
+        for suite in suites:
+            tasks = self._build_task_list(suite)
+            if not tasks:
+                logger.warning("No tasks to evaluate (suite=%r, tasks=%r)", suite, cfg.tasks)
+                continue
+            for task_id in tasks:
+                for ep in range(cfg.episodes_per_task):
+                    work_items.append((suite, task_id, ep))
 
         # Shard round-robin
         if self.num_shards is not None and self.shard_id is not None:
@@ -244,10 +254,14 @@ class Orchestrator:
         self._update_progress(0, total_items, 0)
 
         # Run episodes
-        for item_idx, (task_id, ep) in enumerate(work_items):
-            task_name = f"task_{task_id}"
+        multi_suite = len(suites) > 1
+        for item_idx, (suite, task_id, ep) in enumerate(work_items):
+            task_name = f"{suite}_task_{task_id}" if multi_suite else f"task_{task_id}"
             try:
-                ep_result = self._run_episode(task_id, ep)
+                if multi_suite or suite != cfg.suite:
+                    ep_result = self._run_episode(task_id, ep, suite=suite)
+                else:
+                    ep_result = self._run_episode(task_id, ep)
                 collector.record(task_name, ep_result)
                 status = "SUCCESS" if ep_result.get("metrics", {}).get("success") else "FAIL"
                 logger.info(
@@ -285,7 +299,23 @@ class Orchestrator:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _build_task_list(self) -> list[int | str]:
+    def _build_suite_list(self) -> list[str]:
+        """Build the list of fully-qualified suites to evaluate."""
+        from roboeval.config import get_suites_for_benchmark, qualify_suite
+
+        cfg = self.config
+        suites: list[str] = []
+        for suite in resolve_suites(cfg.suite):
+            try:
+                benchmark_suites = get_suites_for_benchmark(cfg.sim)
+            except ValueError:
+                benchmark_suites = []
+            if suite in benchmark_suites:
+                suite = qualify_suite(cfg.sim, suite)
+            suites.append(suite)
+        return suites
+
+    def _build_task_list(self, suite: str | None = None) -> list[int | str]:
         """Build the list of task IDs to evaluate."""
         cfg = self.config
         if cfg.tasks:
@@ -295,7 +325,7 @@ class Orchestrator:
         else:
             # Default: tasks 0..max_tasks-1 or all tasks in suite
             # Fall back to a reasonable default for libero suites
-            default_n = _SUITE_TASK_COUNTS.get(cfg.suite, 10)
+            default_n = _SUITE_TASK_COUNTS.get(suite or cfg.suite, 10)
             tasks = list(range(default_n))
 
         if cfg.max_tasks is not None:
@@ -389,7 +419,12 @@ class Orchestrator:
         except OSError as e:
             logger.debug("Could not write progress file: %s", e)
 
-    def _build_subprocess_cmd(self, task_id: int | str, episode: int) -> list[str]:
+    def _build_subprocess_cmd(
+        self,
+        task_id: int | str,
+        episode: int,
+        suite: str | None = None,
+    ) -> list[str]:
         """Build the roboeval.run_sim_eval subprocess command line."""
         cfg = self.config
 
@@ -406,7 +441,7 @@ class Orchestrator:
             "--task",
             str(task_id),
             "--suite",
-            cfg.suite,
+            suite or cfg.suite,
             "--sim-url",
             cfg.sim_url,
             "--episode",
@@ -429,6 +464,17 @@ class Orchestrator:
         if cfg.vlm_endpoint:
             cmd += ["--vlm-endpoint", cfg.vlm_endpoint]
 
+        if cfg.sim_config:
+            if isinstance(cfg.sim_config, str):
+                sim_config_path = cfg.sim_config
+            else:
+                import yaml  # type: ignore
+
+                sim_config_path = str(self._output_dir / "sim_config.yaml")
+                with open(sim_config_path, "w") as f:
+                    yaml.safe_dump(cfg.sim_config, f, sort_keys=True)
+            cmd += ["--sim-config", sim_config_path]
+
         # Forward any extra params
         for k, v in cfg.params.items():
             cmd += [f"--{k.replace('_', '-')}", str(v)]
@@ -444,14 +490,19 @@ class Orchestrator:
         env.update(self.extra_env)
         return env
 
-    def _run_episode(self, task_id: int | str, episode: int) -> dict[str, Any]:
+    def _run_episode(
+        self,
+        task_id: int | str,
+        episode: int,
+        suite: str | None = None,
+    ) -> dict[str, Any]:
         """Run a single episode via subprocess and collect the result.
 
         Returns an EpisodeResult dict.
         """
         from roboeval.results.collector import EpisodeResult
 
-        cmd = self._build_subprocess_cmd(task_id, episode)
+        cmd = self._build_subprocess_cmd(task_id, episode, suite=suite)
         env = self._build_subprocess_env()
         cfg = self.config
 
@@ -503,7 +554,7 @@ class Orchestrator:
             return result
 
         # Try to read the episode JSON written by episode_logger
-        ep_json = self._read_episode_json(cfg.suite, task_id, episode)
+        ep_json = self._read_episode_json(suite or cfg.suite, task_id, episode)
         if ep_json is not None:
             steps = ep_json.get("steps", 0)
             success = bool(ep_json.get("success", False))
@@ -609,6 +660,10 @@ _SUITE_TASK_COUNTS: dict[str, int] = {
     "libero_goal": 10,
     "libero_10": 10,
     "libero_90": 90,
+    "libero_infinity_spatial": 10,
+    "libero_infinity_object": 10,
+    "libero_infinity_goal": 10,
+    "libero_infinity_10": 10,
     "robocasa": 20,
     "robotwin": 20,
 }

@@ -1,0 +1,34 @@
+# roboeval smoke config: Pi 0.5 x LIBERO-Infinity full-axis perturbations
+#
+# Usage:
+#   roboeval serve --vla pi05 --sim libero_infinity --headless &
+#   roboeval run -c configs/libero_infinity_pi05_full_perturb_smoke.yaml
+
+name: libero_infinity_pi05_full_perturb_smoke
+
+vla: pi05
+vla_url: http://localhost:5100
+
+sim: libero_infinity
+sim_url: http://localhost:5308
+suite: libero_infinity_goal
+# Optional task-name substring filter within the selected suite.
+task: "bowl"
+
+episodes_per_task: 10
+# max_tasks composes with the task filter and full-axis perturbation.
+max_tasks: 2
+
+delta_actions: true
+no_vlm: true
+
+eval_python: ""
+output_dir: results/libero_infinity_pi05_full_perturb_smoke
+
+params: {}
+
+sim_config:
+  perturbation: full
+  seed: 42
+  min_distractors: 1
+  max_distractors: 5

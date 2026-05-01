@@ -30,6 +30,7 @@ from roboeval.orchestrator import (  # tests adjust sys.path before importing lo
     _parse_steps_from_stdout,
     _parse_success_from_stdout,
 )
+from roboeval.config import resolve_suites
 
 # ---------------------------------------------------------------------------
 # EvalConfig tests
@@ -122,11 +123,14 @@ class TestSharding:
         )
         return Orchestrator(config=cfg, shard_id=shard_id, num_shards=num_shards)
 
-    def _get_work_items(self, orch: Orchestrator) -> list[tuple[int, int]]:
+    def _get_work_items(self, orch: Orchestrator) -> list[tuple[str, int | str, int]]:
         """Simulate what Orchestrator.run() does to build work items."""
-        cfg = orch.config
-        tasks = orch._build_task_list()
-        all_items = [(t, ep) for t in tasks for ep in range(cfg.episodes_per_task)]
+        all_items = []
+        for suite in orch._build_suite_list():
+            tasks = orch._build_task_list(suite)
+            all_items.extend(
+                (suite, t, ep) for t in tasks for ep in range(orch.config.episodes_per_task)
+            )
         if orch.num_shards is not None and orch.shard_id is not None:
             all_items = [w for i, w in enumerate(all_items) if i % orch.num_shards == orch.shard_id]
         return all_items
@@ -169,7 +173,7 @@ class TestSharding:
         items = self._get_work_items(self._make_orch(0, 3, episodes_per_task=3, max_tasks=1))
         # 1 task × 3 episodes = items (0,0),(0,1),(0,2); shard 0 gets 0,2 in order? No:
         # item 0 -> shard 0, item 1 -> shard 1, item 2 -> shard 2
-        assert (0, 0) in items
+        assert ("libero_spatial", 0, 0) in items
 
     def test_single_shard(self):
         """1-of-1 sharding is the same as no sharding."""
@@ -193,7 +197,131 @@ class TestSharding:
         )
         orch = Orchestrator(config=cfg)
         items = self._get_work_items(orch)
-        assert items == [("button-press-v2", 0), ("button-press-v2", 1)]
+        assert items == [("", "button-press-v2", 0), ("", "button-press-v2", 1)]
+
+
+class TestSuiteSelection:
+    def test_resolve_libero_infinity_comma_subset(self):
+        assert resolve_suites("libero_infinity_spatial,libero_infinity_goal") == [
+            "libero_infinity_spatial",
+            "libero_infinity_goal",
+        ]
+
+    def test_resolve_single_suite_stays_single(self):
+        assert resolve_suites("libero_infinity_spatial") == ["libero_infinity_spatial"]
+
+    def test_orchestrator_builds_work_items_per_selected_suite(self):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "li_subset",
+                "sim": "libero_infinity",
+                "suite": "libero_infinity_spatial,libero_infinity_goal",
+                "max_tasks": 2,
+                "episodes_per_task": 1,
+                "output_dir": "/tmp",
+            }
+        )
+        orch = Orchestrator(config=cfg)
+        assert orch._build_suite_list() == ["libero_infinity_spatial", "libero_infinity_goal"]
+        assert self._work_items(orch) == [
+            ("libero_infinity_spatial", 0, 0),
+            ("libero_infinity_spatial", 1, 0),
+            ("libero_infinity_goal", 0, 0),
+            ("libero_infinity_goal", 1, 0),
+        ]
+
+    def test_orchestrator_applies_named_task_within_each_selected_suite(self):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "li_named_task",
+                "sim": "libero_infinity",
+                "suite": "libero_infinity_spatial,libero_infinity_goal",
+                "task": "0",
+                "episodes_per_task": 2,
+                "output_dir": "/tmp",
+            }
+        )
+        orch = Orchestrator(config=cfg)
+        assert self._work_items(orch) == [
+            ("libero_infinity_spatial", "0", 0),
+            ("libero_infinity_spatial", "0", 1),
+            ("libero_infinity_goal", "0", 0),
+            ("libero_infinity_goal", "0", 1),
+        ]
+
+    def test_subprocess_command_uses_per_suite_value(self):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "li_subset",
+                "sim": "libero_infinity",
+                "suite": "libero_infinity_spatial,libero_infinity_goal",
+                "output_dir": "/tmp",
+            }
+        )
+        cmd = Orchestrator(config=cfg)._build_subprocess_cmd(
+            task_id=0,
+            episode=0,
+            suite="libero_infinity_goal",
+        )
+        suite_idx = cmd.index("--suite") + 1
+        assert cmd[suite_idx] == "libero_infinity_goal"
+        assert "libero_infinity_spatial,libero_infinity_goal" not in cmd
+
+    @staticmethod
+    def _work_items(orch: Orchestrator) -> list[tuple[str, int | str, int]]:
+        items = []
+        for suite in orch._build_suite_list():
+            for task in orch._build_task_list(suite):
+                for ep in range(orch.config.episodes_per_task):
+                    items.append((suite, task, ep))
+        return items
+
+    def test_libero_infinity_single_suite_subset(self):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "li_spatial",
+                "sim": "libero_infinity",
+                "suite": "libero_infinity_spatial",
+                "episodes_per_task": 1,
+                "max_tasks": 2,
+                "output_dir": "/tmp",
+            }
+        )
+        orch = Orchestrator(config=cfg)
+        assert orch._build_suite_list() == ["libero_infinity_spatial"]
+        assert orch._build_task_list("libero_infinity_spatial") == [0, 1]
+
+    def test_libero_infinity_comma_suite_subset(self):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "li_subset",
+                "sim": "libero_infinity",
+                "suite": "libero_infinity_spatial,libero_infinity_goal",
+                "episodes_per_task": 1,
+                "max_tasks": 1,
+                "output_dir": "/tmp",
+            }
+        )
+        orch = Orchestrator(config=cfg)
+        assert orch._build_suite_list() == [
+            "libero_infinity_spatial",
+            "libero_infinity_goal",
+        ]
+
+    def test_libero_infinity_short_suite_names_are_qualified(self):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "li_short",
+                "sim": "libero_infinity",
+                "suite": "spatial,goal",
+                "output_dir": "/tmp",
+            }
+        )
+        orch = Orchestrator(config=cfg)
+        assert orch._build_suite_list() == [
+            "libero_infinity_spatial",
+            "libero_infinity_goal",
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +464,21 @@ class TestSubprocessCmd:
         assert "--episode" in cmd
         assert "7" in cmd
 
+    def test_cmd_uses_per_work_item_suite_override(self):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "li_subset",
+                "sim": "libero_infinity",
+                "suite": "libero_infinity_spatial,libero_infinity_goal",
+                "sim_url": "http://localhost:5308",
+                "output_dir": "/tmp",
+            }
+        )
+        orch = Orchestrator(config=cfg)
+        cmd = orch._build_subprocess_cmd(task_id=0, episode=0, suite="libero_infinity_goal")
+        suite_index = cmd.index("--suite") + 1
+        assert cmd[suite_index] == "libero_infinity_goal"
+
     def test_cmd_no_vlm_flag(self):
         cfg = EvalConfig.from_dict({"name": "x", "no_vlm": True, "output_dir": "/tmp"})
         orch = Orchestrator(config=cfg)
@@ -399,7 +542,7 @@ class TestOrchestratorRunMocked:
         # Patch _run_episode to return a success result
         call_count = 0
 
-        def fake_run_episode(task_id, episode):
+        def fake_run_episode(task_id, episode, suite=None):
             nonlocal call_count
             call_count += 1
             return {
@@ -428,7 +571,7 @@ class TestOrchestratorRunMocked:
         )
         orch = Orchestrator(config=cfg)
 
-        def failing_run_episode(task_id, episode):
+        def failing_run_episode(task_id, episode, suite=None):
             if episode == 0:
                 raise RuntimeError("Simulated crash")
             return {
@@ -457,7 +600,7 @@ class TestOrchestratorRunMocked:
             }
         )
         orch = Orchestrator(config=cfg)
-        orch._run_episode = lambda t, e: {
+        orch._run_episode = lambda t, e, suite=None: {
             "episode_id": e,
             "metrics": {"success": True},
             "steps": 5,
@@ -480,7 +623,7 @@ class TestOrchestratorRunMocked:
             }
         )
         orch = Orchestrator(config=cfg, shard_id=0, num_shards=2)
-        orch._run_episode = lambda t, e: {
+        orch._run_episode = lambda t, e, suite=None: {
             "episode_id": e,
             "metrics": {"success": True},
             "steps": 5,

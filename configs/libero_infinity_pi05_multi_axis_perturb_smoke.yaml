@@ -1,0 +1,35 @@
+# roboeval smoke config: Pi 0.5 x LIBERO-Infinity custom perturbation axes
+#
+# Usage:
+#   roboeval serve --vla pi05 --sim libero_infinity --headless &
+#   roboeval run -c configs/libero_infinity_pi05_multi_axis_perturb_smoke.yaml
+
+name: libero_infinity_pi05_multi_axis_perturb_smoke
+
+vla: pi05
+vla_url: http://localhost:5100
+
+sim: libero_infinity
+sim_url: http://localhost:5308
+# Selected suite subset; users are not required to run all four suites.
+suite: libero_infinity_spatial,libero_infinity_goal
+task: ""
+
+episodes_per_task: 10
+# Limit the smoke to a task subset across the selected suites.
+max_tasks: 2
+
+delta_actions: true
+no_vlm: true
+
+eval_python: ""
+output_dir: results/libero_infinity_pi05_multi_axis_perturb_smoke
+
+params: {}
+
+sim_config:
+  perturbation:
+    - position
+    - lighting
+    - distractor
+  seed: 42

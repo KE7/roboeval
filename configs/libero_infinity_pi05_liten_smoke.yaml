@@ -6,7 +6,8 @@
 
 # LIBERO-Infinity is the Scenic-driven open-ended perturbation extension of
 # LIBERO. Suites are named libero_infinity_<base> and reuse LIBERO's 7-dim
-# pd_ee_delta_pose action contract; Pi 0.5 drives it natively.
+# pd_ee_delta_pose action contract; Pi 0.5 drives it natively. This smoke uses
+# a custom perturbation-axis combination: position + lighting + distractor.
 
 name: libero_infinity_pi05_smoke_liten
 
@@ -15,12 +16,15 @@ vla_url: http://localhost:5100
 
 sim: libero_infinity
 sim_url: http://localhost:5308
-suite: libero_infinity_spatial
-# LIBERO-Infinity tasks are resolved by name within the libero_infinity_spatial suite.
+# Multiple selected suites are allowed; this does not force all four
+# LIBERO-Infinity suites. Use one suite for a narrower run.
+suite: libero_infinity_spatial,libero_infinity_goal
+# LIBERO-Infinity tasks are resolved by name within each selected suite.
 task: ""
 
 episodes_per_task: 10
-max_tasks: 1
+# max_tasks limits the selected task subset across the chosen suites.
+max_tasks: 2
 
 delta_actions: true
 
@@ -35,3 +39,10 @@ eval_python: ""
 output_dir: results/libero_infinity_pi05_smoke
 
 params: {}
+
+sim_config:
+  perturbation:
+    - position
+    - lighting
+    - distractor
+  max_distractors: 3

@@ -1278,75 +1278,17 @@ setup_libero_infinity() {
           "$LIBERO_CLONE/libero/configs/__init__.py"
     uv_pip libero_infinity -e "$LIBERO_CLONE"
 
-    # Install libero-infinity.  Some published packages omit scenic_generator.py.
-    # Prefer an editable install from the local dev checkout when present so the
-    # full working-tree (including scenic_generator.py) is used.  Fall back to
-    # PyPI and inject a minimal stub when no local source is found.
+    # Install libero-infinity. Prefer an editable local checkout when present;
+    # otherwise install the upstream package directly so roboeval uses the real
+    # compiler/generator for all perturbation axes.
     local _LI_SRC="${LIBERO_INFINITY_SRC:-$VENDORS_DIR/libero-infinity}"
-    if [[ -f "$_LI_SRC/src/libero_infinity/scenic_generator.py" ]]; then
+    if [[ -f "$_LI_SRC/src/libero_infinity/compiler.py" ]]; then
         log_step "Installing libero-infinity from local dev source: $_LI_SRC"
         uv_pip libero_infinity -e "$_LI_SRC"
     else
-        log_step "Installing libero-infinity from PyPI (>=0.1.0)..."
-        uv_pip libero_infinity "libero-infinity>=0.1.0"
-        # Patch: scenic_generator.py was absent from the PyPI wheel (0.1.x).
-        # Inject a minimal stub so sim_worker can import generate_scenic_file.
-        local _LI_SITE
-        _LI_SITE="$(
-            .venvs/libero_infinity/bin/python -c \
-                'import libero_infinity, pathlib; print(pathlib.Path(libero_infinity.__file__).parent)'
-        )"
-        if [[ ! -f "$_LI_SITE/scenic_generator.py" ]]; then
-            log_warn "scenic_generator.py absent from PyPI wheel — injecting minimal stub."
-            cat > "$_LI_SITE/scenic_generator.py" << 'STUB_EOF'
-# Auto-generated stub: PyPI libero-infinity 0.1.x omitted scenic_generator.
-# Provides generate_scenic_file() / generate_scenic() used by sim_worker.
-from __future__ import annotations
-import pathlib
-from typing import Any
-
-_SCENIC_CACHE = pathlib.Path.home() / ".cache" / "libero-infinity" / "scenic"
-_SCENIC_CACHE.mkdir(parents=True, exist_ok=True)
-generated_scenic_dir = str(_SCENIC_CACHE)
-scenic_dir = str(_SCENIC_CACHE)
-PERTURBATION_AXES: dict[str, Any] = {}
-
-
-def get_dimensions(asset_class: str) -> tuple[float, float, float]:
-    return (0.10, 0.10, 0.05)
-
-
-def get_distractor_pool() -> list[str]:
-    return []
-
-
-def get_variants(asset_class: str) -> list[str]:
-    return []
-
-
-def parse_perturbation(value: Any) -> Any:
-    return None
-
-
-def generate_scenic(cfg: Any, perturbation: Any = None, **kwargs: Any) -> str:
-    """Minimal no-perturbation Scenic program."""
-    return "\n".join([
-        '"""Smoke Scenic: no perturbation, default BDDL positions."""',
-        "model libero_model",
-        "",
-        "param bddl_path = ''",
-        "# No objects declared — default BDDL positions used as-is",
-    ])
-
-
-def generate_scenic_file(cfg: Any, perturbation: Any = None, **kwargs: Any) -> str:
-    """Write Scenic program to cache dir and return its path."""
-    content = generate_scenic(cfg, perturbation=perturbation, **kwargs)
-    out_path = _SCENIC_CACHE / f"_smoke_{id(cfg)}.scenic"
-    out_path.write_text(content)
-    return str(out_path)
-STUB_EOF
-        fi
+        log_step "Installing libero-infinity from upstream git..."
+        uv_pip libero_infinity \
+            "libero-infinity @ git+https://github.com/KE7/libero-infinity.git"
     fi
 
     log_info "LIBERO-Infinity venv ready."

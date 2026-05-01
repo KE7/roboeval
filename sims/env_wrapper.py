@@ -179,6 +179,24 @@ SIM_MAX_STEPS = {
     "metaworld": 500,
 }
 
+LIBERO_INFINITY_PERTURBATION_AXES = (
+    "position",
+    "object",
+    "robot",
+    "camera",
+    "lighting",
+    "texture",
+    "distractor",
+    "background",
+    "articulation",
+)
+
+_LIBERO_INFINITY_PERTURBATION_ALIAS = {
+    "all": "full",
+    "all_axes": "full",
+    "all-axes": "full",
+}
+
 # Suite-specific rollout horizons.
 # CANONICAL definition lives in roboeval/config.py:SUITE_MAX_STEPS.
 # env_wrapper runs in the sim venv (Python 3.8) which cannot import roboeval,
@@ -217,6 +235,44 @@ def _decode_b64_image(b64_str: str) -> Image.Image:
     """Decode a base64 string into a PIL Image."""
     raw = base64.b64decode(b64_str)
     return Image.open(BytesIO(raw))
+
+
+def normalize_libero_infinity_sim_config(sim_name: str, sim_config: dict | None) -> dict:
+    """Normalize LIBERO-Infinity perturbation selectors before HTTP forwarding."""
+    cfg = dict(sim_config or {})
+    if sim_name != "libero_infinity" or "perturbation" not in cfg:
+        return cfg
+
+    valid = set(LIBERO_INFINITY_PERTURBATION_AXES) | {"combined", "full"}
+
+    def _normalize_axis(axis: object) -> str:
+        if not isinstance(axis, str):
+            raise TypeError("LIBERO-Infinity perturbation axes must be strings")
+        normalized = axis.strip().lower()
+        normalized = _LIBERO_INFINITY_PERTURBATION_ALIAS.get(normalized, normalized)
+        if normalized not in valid:
+            raise ValueError(
+                "Unsupported LIBERO-Infinity perturbation axis "
+                f"{axis!r}; expected one of {sorted(valid | set(_LIBERO_INFINITY_PERTURBATION_ALIAS))}"
+            )
+        return normalized
+
+    perturbation = cfg["perturbation"]
+    if isinstance(perturbation, str):
+        if "," in perturbation:
+            cfg["perturbation"] = [
+                _normalize_axis(part) for part in perturbation.split(",") if part.strip()
+            ]
+        else:
+            cfg["perturbation"] = _normalize_axis(perturbation)
+        return cfg
+
+    if isinstance(perturbation, (list, tuple)):
+        axes = [_normalize_axis(axis) for axis in perturbation]
+        cfg["perturbation"] = axes[0] if axes in (["combined"], ["full"]) else axes
+        return cfg
+
+    raise TypeError("LIBERO-Infinity perturbation must be a string or list of strings")
 
 
 def _image_to_numpy(img: Image.Image) -> np.ndarray:
@@ -268,7 +324,7 @@ class SimWrapper(BaseWorldStub):
         ema_alpha: float = 0.5,
     ):
         self.sim_server_url = sim_server_url.rstrip("/")
-        self._sim_config = sim_config or {}
+        self._sim_config = normalize_libero_infinity_sim_config(sim_name, sim_config)
         self.vla_server_url = vla_server_url.rstrip("/")
         self._no_vlm = no_vlm
         self.sim_name = sim_name

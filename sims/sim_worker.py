@@ -1391,6 +1391,100 @@ class LiberoInfinityBackend(LiberoBackend):
         self._post_reset_ang_vel_tol = 0.2
         self._post_reset_target_rot_tol = 0.35
 
+    _PERTURBATION_AXIS_ORDER = (
+        "position",
+        "object",
+        "robot",
+        "camera",
+        "lighting",
+        "texture",
+        "distractor",
+        "background",
+        "articulation",
+    )
+    _PERTURBATION_PRESETS = {
+        "combined": (
+            "position",
+            "object",
+            "robot",
+            "camera",
+            "lighting",
+            "distractor",
+            "background",
+        ),
+        "full": _PERTURBATION_AXIS_ORDER,
+        "all": _PERTURBATION_AXIS_ORDER,
+        "all_axes": _PERTURBATION_AXIS_ORDER,
+        "all-axes": _PERTURBATION_AXIS_ORDER,
+    }
+
+    @classmethod
+    def _normalize_perturbation(cls, value) -> str:
+        """Normalize LIBERO-Infinity perturbation config for upstream compiler APIs."""
+        if value is None:
+            return "position"
+
+        if isinstance(value, str):
+            raw_parts = [part.strip().lower() for part in value.split(",")]
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            raw_parts = []
+            for item in value:
+                if not isinstance(item, str):
+                    raise ValueError(
+                        "LIBERO-Infinity sim_config.perturbation list values must be strings; "
+                        f"got {type(item).__name__}: {item!r}"
+                    )
+                raw_parts.extend(part.strip().lower() for part in item.split(","))
+        else:
+            raise ValueError(
+                "LIBERO-Infinity sim_config.perturbation must be a string or list of strings; "
+                f"got {type(value).__name__}: {value!r}"
+            )
+
+        requested = [part for part in raw_parts if part]
+        if not requested:
+            return "position"
+
+        presets = dict(cls._PERTURBATION_PRESETS)
+        try:
+            from libero_infinity.planner.composition import AXIS_PRESETS
+
+            presets.update({name: tuple(axes) for name, axes in AXIS_PRESETS.items()})
+            if "full" in presets:
+                presets.setdefault("all", presets["full"])
+        except Exception:
+            pass
+
+        known_axes = set(cls._PERTURBATION_AXIS_ORDER)
+        for axes in presets.values():
+            known_axes.update(axes)
+
+        expanded: set[str] = set()
+        unknown: list[str] = []
+        for part in requested:
+            if part in presets:
+                expanded.update(presets[part])
+            elif part in known_axes:
+                expanded.add(part)
+            else:
+                unknown.append(part)
+
+        if unknown:
+            valid_axes = ", ".join(cls._PERTURBATION_AXIS_ORDER)
+            valid_presets = ", ".join(sorted(presets))
+            raise ValueError(
+                "Unknown LIBERO-Infinity perturbation axis/preset "
+                f"{', '.join(repr(axis) for axis in unknown)}. "
+                f"Known axes: {valid_axes}. Presets: {valid_presets}. "
+                "Use a scalar string, a comma-separated string like "
+                "'position,camera,distractor', or a YAML list like "
+                "['position', 'camera']."
+            )
+
+        ordered = [axis for axis in cls._PERTURBATION_AXIS_ORDER if axis in expanded]
+        ordered.extend(sorted(expanded.difference(ordered)))
+        return ",".join(ordered)
+
     def init(
         self,
         task_name: str,
@@ -1417,7 +1511,7 @@ class LiberoInfinityBackend(LiberoBackend):
 
         sim_config = sim_config or {}
         self._camera_resolution = camera_resolution
-        self._perturbation = sim_config.get("perturbation", "position")
+        self._perturbation = self._normalize_perturbation(sim_config.get("perturbation"))
         self._max_steps = sim_config.get("max_steps", 300)
         self._run_seed = sim_config.get("seed", 42)
         self._max_reset_attempts = max(1, int(sim_config.get("max_reset_attempts", 5)))
@@ -1449,7 +1543,21 @@ class LiberoInfinityBackend(LiberoBackend):
         self._bddl_path = self._resolve_bddl_path(suite, task_name)
 
         # Parse the BDDL to get task metadata and generate the Scenic program
-        from libero_infinity.scenic_generator import generate_scenic_file
+        try:
+            from libero_infinity.compiler import generate_scenic_file
+        except ImportError:
+            from libero_infinity import scenic_generator as _scenic_generator
+
+            generate_scenic_file = _scenic_generator.generate_scenic_file
+            if not getattr(_scenic_generator, "PERTURBATION_AXES", None):
+                logger.warning(
+                    "Installed libero_infinity.scenic_generator does not advertise "
+                    "perturbation axes; sim_config.perturbation=%r will be forwarded "
+                    "but may be ignored by that installed generator. Upgrade "
+                    "libero-infinity or install an editable compiler-enabled version "
+                    "for full-axis perturbations.",
+                    self._perturbation,
+                )
         from libero_infinity.task_config import TaskConfig
 
         cfg = TaskConfig.from_bddl(self._bddl_path)
