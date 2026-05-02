@@ -363,7 +363,10 @@ def _run_cell(
         metrics["video_error"] = "required playable video artifact was not produced"
     metrics_path = output_root / cell.name / ("pilot_metrics.json" if pilot else "run_metrics.json")
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True), encoding="utf-8")
+    metrics_path.write_text(
+        json.dumps(metrics, indent=2, sort_keys=True, default=str),
+        encoding="utf-8",
+    )
     return metrics
 
 
@@ -421,7 +424,7 @@ def main() -> int:
             failures += 1
             continue
         metrics = _run_cell(cell, index=i, args=args, pilot=args.mode == "pilot")
-        print(json.dumps(metrics, indent=2, sort_keys=True))
+        print(json.dumps(metrics, indent=2, sort_keys=True, default=str))
         if metrics["returncode"] != 0:
             failures += 1
     return 1 if failures else 0

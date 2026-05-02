@@ -42,6 +42,14 @@ logger = logging.getLogger(__name__)
 
 _SAFE_NAME_RE = re.compile(r"[^\w\-.]")
 
+
+class ResetResamplingExhausted(RuntimeError):
+    """Raised when all bounded reset-resampling candidates fail before rollout."""
+
+    def __init__(self, message: str, audit: dict[str, Any]):
+        super().__init__(message)
+        self.audit = audit
+
 # ---------------------------------------------------------------------------
 # EvalConfig dataclass
 # ---------------------------------------------------------------------------
@@ -100,6 +108,11 @@ class EvalConfig:
     params: dict[str, Any] = field(default_factory=dict)
     # Extra simulator configuration forwarded via --sim-config.
     sim_config: dict[str, Any] | str | None = None
+    # Opt-in policy for generated-scene reset/startup failures. When enabled,
+    # zero-step reset/startup candidates are excluded from completed eval
+    # episodes and retried with deterministic later scene indices.
+    reset_resample_on_failure: bool = False
+    reset_resample_max_attempts: int = 1
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> EvalConfig:
@@ -128,6 +141,8 @@ class EvalConfig:
         cfg.output_dir = d.get("output_dir", "./results")
         cfg.params = d.get("params", {})
         cfg.sim_config = d.get("sim_config", None)
+        cfg.reset_resample_on_failure = bool(d.get("reset_resample_on_failure", False))
+        cfg.reset_resample_max_attempts = max(1, int(d.get("reset_resample_max_attempts", 1)))
         return cfg
 
     @classmethod
@@ -166,6 +181,8 @@ class EvalConfig:
             "output_dir": self.output_dir,
             "params": self.params,
             "sim_config": self.sim_config,
+            "reset_resample_on_failure": self.reset_resample_on_failure,
+            "reset_resample_max_attempts": self.reset_resample_max_attempts,
         }
 
 
@@ -210,6 +227,7 @@ class Orchestrator:
         self._progress_path: Path | None = None
         self._lock_fd: int | None = None
         self._lock_path: Path | None = None
+        self._blockers: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -284,6 +302,16 @@ class Orchestrator:
                     status,
                     ep_result.get("steps", 0),
                 )
+            except ResetResamplingExhausted as exc:
+                logger.error(
+                    "  [%d/%d] %s ep%d: RESET RESAMPLING EXHAUSTED",
+                    item_idx + 1,
+                    total_items,
+                    task_name,
+                    ep,
+                )
+                self._blockers.append(exc.audit)
+                break
             except Exception:
                 logger.exception(
                     "  [%d/%d] %s ep%d: ERROR",
@@ -302,9 +330,19 @@ class Orchestrator:
                 }
                 collector.record(task_name, failed)
             finally:
-                self._update_progress(item_idx + 1, total_items, collector.error_count)
+                self._update_progress(
+                    item_idx + 1,
+                    total_items,
+                    collector.error_count + len(self._blockers),
+                )
 
-        return self._save_results(collector, output_path)
+        result = self._save_results(collector, output_path)
+        if self._blockers:
+            raise RuntimeError(
+                "reset resampling exhausted before completing all requested eval episodes; "
+                f"see {self._output_dir / 'reset_resampling_audit.jsonl'}"
+            )
+        return result
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -435,6 +473,7 @@ class Orchestrator:
         task_id: int | str,
         episode: int,
         suite: str | None = None,
+        result_episode: int | None = None,
     ) -> list[str]:
         """Build the roboeval.run_sim_eval subprocess command line."""
         cfg = self.config
@@ -463,6 +502,8 @@ class Orchestrator:
             str(self._output_dir),
             "--headless",
         ]
+        if result_episode is not None and result_episode != episode:
+            cmd += ["--result-episode", str(result_episode)]
 
         if cfg.no_vlm:
             cmd.append("--no-vlm")
@@ -525,9 +566,112 @@ class Orchestrator:
 
         Returns an EpisodeResult dict.
         """
+        cfg = self.config
+        max_attempts = cfg.reset_resample_max_attempts if cfg.reset_resample_on_failure else 1
+        resample_attempts: list[dict[str, Any]] = []
+
+        last_reset_audit: dict[str, Any] | None = None
+        for attempt in range(max_attempts):
+            scene_episode = episode + attempt * max(1, cfg.episodes_per_task)
+            result, proc_stdout, proc_stderr = self._run_episode_once(
+                task_id,
+                scene_episode,
+                suite=suite,
+                result_episode=episode if scene_episode != episode else None,
+            )
+            is_reset_failure = (
+                cfg.reset_resample_on_failure
+                and self._is_reset_startup_failure(result, proc_stdout, proc_stderr)
+            )
+            if not is_reset_failure:
+                if resample_attempts:
+                    result["reset_resampling"] = {
+                        "policy": "exclude zero-step reset/startup failures; retry deterministic scene index",
+                        "logical_episode_id": episode,
+                        "accepted_scene_episode_id": scene_episode,
+                        "attempts_before_accept": resample_attempts,
+                        "max_attempts": max_attempts,
+                    }
+                    self._append_reset_resampling_audit(
+                        {
+                            "event": "accepted_resampled_scene",
+                            "task_id": task_id,
+                            "suite": suite or cfg.suite,
+                            "logical_episode_id": episode,
+                            "scene_episode_id": scene_episode,
+                            "attempt": attempt,
+                            "max_attempts": max_attempts,
+                            "result": result,
+                        }
+                    )
+                return result
+
+            audit = self._reset_attempt_audit_record(
+                task_id=task_id,
+                suite=suite or cfg.suite,
+                logical_episode=episode,
+                scene_episode=scene_episode,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                result=result,
+                stdout=proc_stdout,
+                stderr=proc_stderr,
+            )
+            last_reset_audit = audit
+            resample_attempts.append(audit)
+            self._append_reset_resampling_audit(audit)
+            if attempt + 1 >= max_attempts:
+                exhausted = {
+                    "event": "reset_resampling_exhausted",
+                    "policy": (
+                        "zero-step reset/startup failures are excluded from completed "
+                        "eval episodes; bounded candidate budget exhausted"
+                    ),
+                    "task_id": task_id,
+                    "suite": suite or cfg.suite,
+                    "logical_episode_id": episode,
+                    "max_attempts": max_attempts,
+                    "attempts": resample_attempts,
+                    "last_failure": last_reset_audit,
+                }
+                self._append_reset_resampling_audit(exhausted)
+                raise ResetResamplingExhausted(
+                    (
+                        f"reset/startup failures exhausted {max_attempts} candidates "
+                        f"for task={task_id} logical_ep={episode}"
+                    ),
+                    exhausted,
+                )
+            logger.warning(
+                "Reset/startup failure excluded from eval episode task=%s ep=%d "
+                "scene_ep=%d attempt=%d/%d; retrying",
+                task_id,
+                episode,
+                scene_episode,
+                attempt + 1,
+                max_attempts,
+            )
+
+        # The loop always returns from its final iteration.
+        return result
+
+    def _run_episode_once(
+        self,
+        task_id: int | str,
+        episode: int,
+        suite: str | None = None,
+        result_episode: int | None = None,
+    ) -> tuple[dict[str, Any], str, str]:
+        """Run one scene candidate and return result plus captured process output."""
         from roboeval.results.collector import EpisodeResult
 
-        cmd = self._build_subprocess_cmd(task_id, episode, suite=suite)
+        output_episode = result_episode if result_episode is not None else episode
+        cmd = self._build_subprocess_cmd(
+            task_id,
+            episode,
+            suite=suite,
+            result_episode=result_episode,
+        )
         env = self._build_subprocess_env()
         cfg = self.config
 
@@ -546,14 +690,14 @@ class Orchestrator:
         except subprocess.TimeoutExpired:
             elapsed = time.time() - t_start
             result: EpisodeResult = {
-                "episode_id": episode,
+                "episode_id": output_episode,
                 "metrics": {"success": False},
                 "steps": 0,
                 "elapsed_sec": elapsed,
                 "failure_reason": "timeout",
                 "failure_detail": f"subprocess exceeded {ep_timeout}s timeout",
             }
-            return result
+            return result, "", ""
 
         elapsed = time.time() - t_start
 
@@ -565,44 +709,136 @@ class Orchestrator:
                 proc.returncode,
             )
             logger.warning(
-                "subprocess stderr (last 2000 chars):\n%s",
-                proc.stderr[-2000:] if proc.stderr else "<empty>",
+                "subprocess output (last 2000 chars):\n%s",
+                ((proc.stdout or "") + "\n" + (proc.stderr or ""))[-2000:] or "<empty>",
             )
             result = {
-                "episode_id": episode,
+                "episode_id": output_episode,
                 "metrics": {"success": False},
                 "steps": 0,
                 "elapsed_sec": round(elapsed, 2),
                 "failure_reason": f"nonzero_exit_{proc.returncode}",
-                "failure_detail": proc.stderr[-1000:] if proc.stderr else "",
+                "failure_detail": ((proc.stdout or "") + "\n" + (proc.stderr or ""))[-4000:],
             }
-            return result
+            return result, proc.stdout or "", proc.stderr or ""
 
         # Try to read the episode JSON written by episode_logger
-        ep_json = self._read_episode_json(suite or cfg.suite, task_id, episode)
+        ep_json = self._read_episode_json(suite or cfg.suite, task_id, output_episode)
         if ep_json is not None:
             steps = ep_json.get("steps", 0)
             success = bool(ep_json.get("success", False))
             result = {
-                "episode_id": episode,
+                "episode_id": output_episode,
                 "metrics": {"success": success},
                 "steps": steps,
                 "elapsed_sec": round(elapsed, 2),
             }
-            self._attach_video_artifacts(result, suite or cfg.suite, task_id, episode)
-            return result
+            self._attach_video_artifacts(result, suite or cfg.suite, task_id, output_episode)
+            return result, proc.stdout or "", proc.stderr or ""
 
         # Fallback: parse success from stdout
         success = _parse_success_from_stdout(proc.stdout)
         steps = _parse_steps_from_stdout(proc.stdout)
         result = {
-            "episode_id": episode,
+            "episode_id": output_episode,
             "metrics": {"success": success},
             "steps": steps,
             "elapsed_sec": round(elapsed, 2),
         }
-        self._attach_video_artifacts(result, suite or cfg.suite, task_id, episode)
-        return result
+        self._attach_video_artifacts(result, suite or cfg.suite, task_id, output_episode)
+        return result, proc.stdout or "", proc.stderr or ""
+
+    def _is_reset_startup_failure(self, result: dict[str, Any], stdout: str, stderr: str) -> bool:
+        """Return True for zero-step scene reset/startup failures eligible for resampling."""
+        if result.get("steps", 0) != 0 or not result.get("failure_reason"):
+            return False
+        text = f"{result.get('failure_detail', '')}\n{stdout}\n{stderr}".lower()
+        reset_markers = (
+            "/reset",
+            "resetting simulator",
+            "failed to reach sim server",
+            "internal server error",
+            "too many contacts",
+            "ncon = 5000",
+            "invalid scenic sample after mujoco settling",
+            "failed to reset libero-infinity scene",
+        )
+        init_visibility_markers = (
+            "failed to initialize simulator",
+            "visibility check",
+            "out of frame or fully occluded",
+            "only weakly visible in agentview",
+        )
+        init_markers = ("/init", "post /init", "http 500")
+        if (any(marker in text for marker in init_markers) and any(
+            marker in text for marker in init_visibility_markers
+        )):
+            return True
+        return any(marker in text for marker in reset_markers)
+
+    def _reset_attempt_audit_record(
+        self,
+        *,
+        task_id: int | str,
+        suite: str,
+        logical_episode: int,
+        scene_episode: int,
+        attempt: int,
+        max_attempts: int,
+        result: dict[str, Any],
+        stdout: str,
+        stderr: str,
+    ) -> dict[str, Any]:
+        seed = self._sim_seed()
+        return {
+            "event": "excluded_reset_startup_failure",
+            "task_id": task_id,
+            "suite": suite,
+            "logical_episode_id": logical_episode,
+            "scene_episode_id": scene_episode,
+            "resample_attempt": attempt,
+            "max_attempts": max_attempts,
+            "run_seed": seed,
+            "candidate_scenic_seeds": self._candidate_scenic_seeds(seed, scene_episode),
+            "failure_reason": result.get("failure_reason"),
+            "failure_detail_tail": str(result.get("failure_detail", ""))[-2000:],
+            "stdout_tail": stdout[-2000:],
+            "stderr_tail": stderr[-2000:],
+        }
+
+    def _append_reset_resampling_audit(self, record: dict[str, Any]) -> None:
+        audit_path = self._output_dir / "reset_resampling_audit.jsonl"
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(audit_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+
+    def _sim_seed(self) -> int | None:
+        sim_config = self.config.sim_config
+        if isinstance(sim_config, dict) and "seed" in sim_config:
+            try:
+                return int(sim_config["seed"])
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _candidate_scenic_seeds(self, run_seed: int | None, scene_episode: int) -> list[dict[str, Any]]:
+        if run_seed is None or not isinstance(self.config.sim_config, dict):
+            return []
+        max_reset_attempts = int(self.config.sim_config.get("max_reset_attempts", 1))
+        import hashlib
+
+        return [
+            {
+                "reset_attempt": reset_attempt,
+                "scenic_seed": int(
+                    hashlib.sha256(f"{run_seed}:{scene_episode}:{reset_attempt}".encode()).hexdigest(),
+                    16,
+                )
+                % (2**31),
+                "formula": "sha256(run_seed:scene_episode_index:reset_attempt) % 2**31",
+            }
+            for reset_attempt in range(max(1, max_reset_attempts))
+        ]
 
     def _attach_video_artifacts(
         self,
@@ -648,6 +884,8 @@ class Orchestrator:
             pass
 
         result = collector.get_benchmark_result(config=self.config.to_dict())
+        if self._blockers:
+            result["reset_resampling_blockers"] = self._blockers
 
         # Add shard metadata
         if self.num_shards is not None and self.shard_id is not None:

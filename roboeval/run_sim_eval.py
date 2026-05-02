@@ -194,6 +194,15 @@ def eval_sim(
             "Used by roboeval sharded mode to target individual episodes."
         ),
     ),
+    result_episode: int = typer.Option(
+        None,
+        "--result-episode",
+        help=(
+            "Episode index to write into result JSON/video names. "
+            "Defaults to the simulator episode index. Used when a harness "
+            "resamples a failed reset scene while preserving logical eval slots."
+        ),
+    ),
     sim_config: str = typer.Option(
         None,
         "--sim-config",
@@ -319,6 +328,14 @@ def eval_sim(
     completed_episodes = 0
     failed_before_result = 0
     for episode in range(start_episode, start_episode + max_episodes):
+        output_episode = result_episode if result_episode is not None else episode
+        episode_sim_config = dict(sim_config_dict)
+        if sim == "libero_infinity":
+            # LIBERO-Infinity materializes a scene during /init so SimWrapper can
+            # fetch an immediate observation. Use the targeted scene episode
+            # here; otherwise every sharded/resampled subprocess probes ep0 and
+            # reset resampling cannot escape an ep0 startup failure.
+            episode_sim_config["initial_episode_index"] = episode
         typer.echo(f"\n{'=' * 60}")
         typer.echo(f"Episode {episode - start_episode + 1}/{max_episodes} (init state {episode})")
         typer.echo(f"{'=' * 60}")
@@ -336,7 +353,7 @@ def eval_sim(
                 headless=headless,
                 delta_actions=delta_actions,
                 no_vlm=no_vlm,
-                sim_config=sim_config_dict,
+                sim_config=episode_sim_config,
                 chunk_size=chunk_size,
                 action_ensemble=action_ensemble,
                 ema_alpha=ema_alpha,
@@ -355,6 +372,11 @@ def eval_sim(
             # use_delta=True, and 10 physics warmup steps — all skipped by /init alone.
             typer.echo(f"Resetting simulator to episode {episode} init state...")
             wrapper.physical_reset(episode_index=episode)
+            if output_episode != episode:
+                wrapper.scene_metadata = dict(getattr(wrapper, "scene_metadata", {}) or {})
+                wrapper.scene_metadata["eval_episode_index"] = output_episode
+                wrapper.scene_metadata["scene_episode_index"] = episode
+                wrapper.scene_metadata["resampled_from_failed_reset"] = True
 
             # Get initial observation
             initial_image = wrapper.current_image.copy()
@@ -415,7 +437,7 @@ def eval_sim(
                     prompt_slug = _slugify_filename_component(instruction)
                     video_path = os.path.join(
                         videos_dir,
-                        f"{suite}_task{task}_ep{episode}_{prompt_slug}.mp4",
+                        f"{suite}_task{task}_ep{output_episode}_{prompt_slug}.mp4",
                     )
                     save_episode_video(
                         all_frames,
@@ -426,7 +448,7 @@ def eval_sim(
 
             ep_result = EpisodeResult(
                 task=int(task) if str(task).isdigit() else 0,
-                episode=episode,
+                episode=output_episode,
                 success=sim_success,
                 steps=total_steps,
                 duration_s=round(ep_duration, 2),
@@ -445,7 +467,7 @@ def eval_sim(
                     ep_results_dir,
                     suite,
                     int(task) if str(task).isdigit() else 0,
-                    episode,
+                    output_episode,
                     ep_result,
                 )
                 typer.echo(f"  Episode JSON: {ep_json_path}")

@@ -1671,10 +1671,11 @@ class LiberoInfinityBackend(LiberoBackend):
 
         # Match the sim-worker contract expected by SimWrapper: /init must leave
         # the backend ready for an immediate /obs call. LIBERO-Infinity only
-        # compiles the Scenic scenario here, so materialize the first sampled
-        # scene now and then restore the episode counter for the real eval loop.
-        self.reset(episode_index=0)
-        self._ep_idx = 0
+        # compiles the Scenic scenario here, so materialize the requested scene
+        # now and then restore the episode counter for the real eval loop.
+        initial_episode_index = int(sim_config.get("initial_episode_index", 0))
+        self.reset(episode_index=initial_episode_index)
+        self._ep_idx = initial_episode_index
 
         return {"task_description": cfg.language}
 
@@ -1759,7 +1760,10 @@ class LiberoInfinityBackend(LiberoBackend):
                 }
                 return self._extract_images(obs)
             except RuntimeError as exc:
-                if "Invalid Scenic sample after MuJoCo settling" not in str(exc):
+                if not (
+                    "Invalid Scenic sample after MuJoCo settling" in str(exc)
+                    or "Invalid Scenic sample after visibility check" in str(exc)
+                ):
                     raise
                 last_exc = exc
                 if self._sim is not None:

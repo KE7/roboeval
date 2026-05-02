@@ -27,6 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from roboeval.orchestrator import (  # tests adjust sys.path before importing local package.
     EvalConfig,
     Orchestrator,
+    ResetResamplingExhausted,
     _parse_steps_from_stdout,
     _parse_success_from_stdout,
 )
@@ -43,6 +44,8 @@ class TestEvalConfig:
         assert cfg.no_vlm is True
         assert cfg.delta_actions is True
         assert cfg.episodes_per_task == 10
+        assert cfg.reset_resample_on_failure is False
+        assert cfg.reset_resample_max_attempts == 1
 
     def test_from_dict_minimal(self):
         cfg = EvalConfig.from_dict({"name": "test_run"})
@@ -67,6 +70,8 @@ class TestEvalConfig:
             "record_video_n": 2,
             "output_dir": "/tmp/test_out",
             "params": {"seed": 42},
+            "reset_resample_on_failure": True,
+            "reset_resample_max_attempts": 4,
         }
         cfg = EvalConfig.from_dict(d)
         assert cfg.vla_url == "http://localhost:9999"
@@ -78,6 +83,8 @@ class TestEvalConfig:
         assert cfg.record_video is True
         assert cfg.record_video_n == 2
         assert cfg.params == {"seed": 42}
+        assert cfg.reset_resample_on_failure is True
+        assert cfg.reset_resample_max_attempts == 4
 
     def test_to_dict_round_trip(self):
         cfg = EvalConfig.from_dict({"name": "rt", "episodes_per_task": 7})
@@ -272,6 +279,17 @@ class TestSuiteSelection:
         suite_idx = cmd.index("--suite") + 1
         assert cmd[suite_idx] == "libero_infinity_goal"
         assert "libero_infinity_spatial,libero_infinity_goal" not in cmd
+
+    def test_subprocess_command_can_write_logical_result_episode(self):
+        cfg = EvalConfig.from_dict({"name": "x", "output_dir": "/tmp"})
+        cmd = Orchestrator(config=cfg)._build_subprocess_cmd(
+            task_id=0,
+            episode=20,
+            result_episode=0,
+        )
+        result_idx = cmd.index("--result-episode") + 1
+        assert result_idx
+        assert cmd[result_idx] == "0"
 
     @staticmethod
     def _work_items(orch: Orchestrator) -> list[tuple[str, int | str, int]]:
@@ -569,6 +587,86 @@ class TestSubprocessCmd:
         orch = Orchestrator(config=cfg, extra_env={"VLA_URL": "http://localhost:1234"})
         env = orch._build_subprocess_env()
         assert env["VLA_URL"] == "http://localhost:1234"
+
+    def test_reset_resampling_skips_zero_step_reset_failure(self, tmp_path):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "x",
+                "output_dir": str(tmp_path),
+                "episodes_per_task": 20,
+                "reset_resample_on_failure": True,
+                "reset_resample_max_attempts": 3,
+                "sim_config": {"seed": 42, "max_reset_attempts": 2},
+            }
+        )
+        orch = Orchestrator(config=cfg)
+        calls = []
+
+        def fake_run_once(task_id, episode, suite=None, result_episode=None):
+            calls.append((task_id, episode, result_episode))
+            if len(calls) == 1:
+                return (
+                    {
+                        "episode_id": 0,
+                        "metrics": {"success": False},
+                        "steps": 0,
+                        "failure_reason": "nonzero_exit_1",
+                        "failure_detail": "POST /reset returned HTTP 500: Too many contacts",
+                    },
+                    "Resetting simulator to episode 0 init state",
+                    "",
+                )
+            return (
+                {"episode_id": 0, "metrics": {"success": False}, "steps": 301},
+                "",
+                "",
+            )
+
+        orch._run_episode_once = fake_run_once  # type: ignore[method-assign]
+        result = orch._run_episode(0, 0, suite="libero_infinity_spatial")
+        assert result["steps"] == 301
+        assert calls == [(0, 0, None), (0, 20, 0)]
+        audit_path = tmp_path / "reset_resampling_audit.jsonl"
+        lines = [json.loads(line) for line in audit_path.read_text().splitlines()]
+        assert lines[0]["event"] == "excluded_reset_startup_failure"
+        assert lines[0]["logical_episode_id"] == 0
+        assert lines[0]["scene_episode_id"] == 0
+        assert len(lines[0]["candidate_scenic_seeds"]) == 2
+        assert lines[1]["event"] == "accepted_resampled_scene"
+
+    def test_reset_resampling_exhaustion_is_blocker_not_episode(self, tmp_path):
+        cfg = EvalConfig.from_dict(
+            {
+                "name": "x",
+                "output_dir": str(tmp_path),
+                "episodes_per_task": 20,
+                "reset_resample_on_failure": True,
+                "reset_resample_max_attempts": 2,
+                "sim_config": {"seed": 42, "max_reset_attempts": 1},
+            }
+        )
+        orch = Orchestrator(config=cfg)
+
+        def fake_run_once(task_id, episode, suite=None, result_episode=None):
+            return (
+                {
+                    "episode_id": result_episode if result_episode is not None else episode,
+                    "metrics": {"success": False},
+                    "steps": 0,
+                    "failure_reason": "nonzero_exit_1",
+                    "failure_detail": "POST /reset returned HTTP 500: Invalid Scenic sample",
+                },
+                "Resetting simulator to episode",
+                "",
+            )
+
+        orch._run_episode_once = fake_run_once  # type: ignore[method-assign]
+        with pytest.raises(ResetResamplingExhausted):
+            orch._run_episode(0, 0, suite="libero_infinity_spatial")
+        audit_path = tmp_path / "reset_resampling_audit.jsonl"
+        lines = [json.loads(line) for line in audit_path.read_text().splitlines()]
+        assert lines[-1]["event"] == "reset_resampling_exhausted"
+        assert len(lines[-1]["attempts"]) == 2
 
 
 # ---------------------------------------------------------------------------
