@@ -47,6 +47,122 @@ logger = logging.getLogger(__name__)
 _headless: bool = False
 
 
+# POSTFIX-RERUN PATCH (4): seed-deterministic Scenic skip-list loader.
+# YAML schema (see configs/libero_infinity_skip_indices_seed42.yaml):
+#   seed: <int>                    # informational
+#   indices: [int, int, ...]       # applied to all tasks
+#   per_task:
+#     "<task_name>": [int, int]    # additional, task-specific
+#
+# Activated by setting env var ``LIBERO_SCENIC_SKIP_INDICES`` to the YAML
+# path. Returns an empty set if the env var is unset, the file is missing,
+# or parsing fails — never raises (defensive: a misconfigured skip-list
+# must never break a clean episode).
+_SCENIC_SKIP_CACHE: dict[str, frozenset[int]] = {}
+
+# POSTFIX-RERUN PATCH (6): per-task init-state skip-list loader.
+# Parallel to LIBERO_SCENIC_SKIP_INDICES but scoped to runaway-cost cells
+# (e.g. exp4 task8 combined-perturbation init states whose Scenic compile
+# legitimately exceeds the /init timeout). YAML schema:
+#   seed: <int>
+#   per_task:
+#     "<task_name>": [int, int, ...]
+# Activated by setting LIBERO_TASK8_SKIP_INIT_STATES to the YAML path.
+_INIT_STATE_SKIP_CACHE: dict[str, frozenset[int]] = {}
+
+
+def _resolve_skip_indices_from_doc(
+    doc: dict, task_name: str, suite: str
+) -> frozenset[int]:
+    """POSTFIX-RERUN PATCH (6b): suite-scoped resolution.
+
+    Resolution order (each contributes additively):
+      1. ``per_suite_task[<suite>][<task>]`` — preferred, scoped.
+      2. Legacy ``per_task[<task>]`` — only honored when the YAML also
+         declares ``legacy_per_task_suite: <suite>`` matching the caller's
+         suite. Prevents the cross-experiment leakage observed for exp4
+         task8 where a libero_infinity_goal-scoped list bled into
+         libero_infinity_spatial.
+      3. Legacy ``indices: [...]`` — flat list, only honored when
+         ``legacy_per_task_suite`` matches the caller's suite (same gate).
+    """
+    out: list[int] = []
+    pst = doc.get("per_suite_task") or {}
+    if suite and isinstance(pst, dict):
+        suite_block = pst.get(str(suite)) or {}
+        if isinstance(suite_block, dict):
+            out.extend(int(x) for x in (suite_block.get(str(task_name)) or []))
+    legacy_suite = doc.get("legacy_per_task_suite")
+    if legacy_suite and str(legacy_suite) == str(suite or ""):
+        out.extend(int(x) for x in (doc.get("indices") or []))
+        out.extend(
+            int(x)
+            for x in ((doc.get("per_task") or {}).get(str(task_name), []) or [])
+        )
+    return frozenset(out)
+
+
+def _load_init_state_skip_indices(
+    task_name: str, suite: str = ""
+) -> frozenset[int]:
+    """Return the union of skip indices sourced from
+    LIBERO_TASK8_SKIP_INIT_STATES — defensive: never raises."""
+    path = os.environ.get("LIBERO_TASK8_SKIP_INIT_STATES")
+    if not path:
+        return frozenset()
+    cache_key = f"{path}::{suite}::{task_name}"
+    if cache_key in _INIT_STATE_SKIP_CACHE:
+        return _INIT_STATE_SKIP_CACHE[cache_key]
+    try:
+        import yaml  # local import
+
+        with open(path) as fh:
+            doc = yaml.safe_load(fh) or {}
+        merged = _resolve_skip_indices_from_doc(doc, task_name, suite)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "Failed to load init-state skip-list from %r (suite=%s task=%s): %s; "
+            "falling back to empty set.",
+            path,
+            suite,
+            task_name,
+            exc,
+        )
+        merged = frozenset()
+    _INIT_STATE_SKIP_CACHE[cache_key] = merged
+    return merged
+
+
+def _load_scenic_skip_indices(
+    task_name: str, suite: str = ""
+) -> frozenset[int]:
+    """Return the suite-scoped union of skip indices for this task."""
+    path = os.environ.get("LIBERO_SCENIC_SKIP_INDICES")
+    if not path:
+        return frozenset()
+    cache_key = f"{path}::{suite}::{task_name}"
+    if cache_key in _SCENIC_SKIP_CACHE:
+        return _SCENIC_SKIP_CACHE[cache_key]
+    try:
+        import yaml  # local import to avoid hard dep when feature unused
+
+        with open(path) as fh:
+            doc = yaml.safe_load(fh) or {}
+        merged = _resolve_skip_indices_from_doc(doc, task_name, suite)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "Failed to load Scenic skip-list from %r (suite=%s task=%s): %s; "
+            "falling back to empty set.",
+            path,
+            suite,
+            task_name,
+            exc,
+        )
+        merged = frozenset()
+    _SCENIC_SKIP_CACHE[cache_key] = merged
+    return merged
+
+
 def encode_image_b64(img_array: np.ndarray) -> str:
     """Encode a numpy RGB image array as a base64 PNG string."""
     from PIL import Image
@@ -1384,7 +1500,7 @@ class LiberoInfinityBackend(LiberoBackend):
         self._ep_idx = 0  # auto-incrementing episode counter
         self._last_obs: dict = {}  # cache last obs dict for state extraction
         self._last_scene_metadata: dict = {}
-        self._max_reset_attempts = 5
+        self._max_reset_attempts = 25
         self._max_scenic_iterations = 1000
         self._post_reset_settle_steps = 80
         self._post_reset_stable_steps = 10
@@ -1591,7 +1707,33 @@ class LiberoInfinityBackend(LiberoBackend):
         self._perturbation = self._normalize_perturbation(sim_config.get("perturbation"))
         self._max_steps = sim_config.get("max_steps", 300)
         self._run_seed = sim_config.get("seed", 42)
-        self._max_reset_attempts = max(1, int(sim_config.get("max_reset_attempts", 5)))
+        # POSTFIX-RERUN PATCH (3-ext): env-var override for the outer Scenic
+        # resample loop — distinct from MAX_VISIBILITY_RETRIES which gates
+        # the inner per-frame visibility recheck. Default raised 25 → 100
+        # via env var. sim_config explicit value still wins if provided.
+        # POSTFIX-RERUN PATCH (6b): additional override
+        # ``LIBERO_VISIBILITY_VALIDATOR_RETRIES`` (default 1000) so we can
+        # raise the cap above LIBERO_MAX_RESET_ATTEMPTS without broadening
+        # the existing knob. Whichever knob is higher wins; sim_config
+        # explicit value still wins if provided.
+        _default_reset_attempts = 25
+        try:
+            _default_reset_attempts = int(
+                os.environ.get("LIBERO_MAX_RESET_ATTEMPTS", "100")
+            )
+        except ValueError:
+            _default_reset_attempts = 100
+        try:
+            _validator_retries = int(
+                os.environ.get("LIBERO_VISIBILITY_VALIDATOR_RETRIES", "1000")
+            )
+        except ValueError:
+            _validator_retries = 1000
+        _default_reset_attempts = max(_default_reset_attempts, _validator_retries)
+        self._max_reset_attempts = max(
+            1,
+            int(sim_config.get("max_reset_attempts", _default_reset_attempts)),
+        )
         self._max_scenic_iterations = max(
             1,
             int(sim_config.get("max_scenic_iterations", 1000)),
@@ -1669,6 +1811,28 @@ class LiberoInfinityBackend(LiberoBackend):
 
         self._orig_obj_classes = parse_object_classes(pathlib.Path(self._bddl_path).read_text())
 
+        # POSTFIX-RERUN PATCH (4): load seed-deterministic Scenic skip-list.
+        # Stored on the instance so reset() can short-circuit known-bad
+        # episode indices instead of letting them burn 25k Scenic iterations.
+        self._task_name = str(task_name)
+        self._suite = str(suite or "")
+        # POSTFIX-RERUN PATCH (6b): pass suite into the loaders so the
+        # YAML's per-suite/per-task scoping prevents cross-experiment
+        # leakage (e.g. exp3 libero_infinity_goal indices bleeding into
+        # exp4 libero_infinity_spatial task8).
+        self._scenic_skip_indices = _load_scenic_skip_indices(
+            self._task_name, suite=self._suite
+        )
+        # POSTFIX-RERUN PATCH (6): per-task init-state skip-list (parallel
+        # knob for runaway-cost cells like exp4 task8 combined where Scenic
+        # compile/sample legitimately blows the /init timeout). Merged
+        # with the Scenic skip-list during reset() so a single short-
+        # circuit covers both deterministic-failure and runaway-cost
+        # episodes.
+        self._init_state_skip_indices = _load_init_state_skip_indices(
+            self._task_name, suite=self._suite
+        )
+
         # Match the sim-worker contract expected by SimWrapper: /init must leave
         # the backend ready for an immediate /obs call. LIBERO-Infinity only
         # compiles the Scenic scenario here, so materialize the requested scene
@@ -1713,6 +1877,27 @@ class LiberoInfinityBackend(LiberoBackend):
         ep_idx = episode_index if episode_index is not None else self._ep_idx
         self._ep_idx = ep_idx + 1
         last_exc = None
+
+        # POSTFIX-RERUN PATCH (4): short-circuit known-deterministic Scenic
+        # rejection failures so we don't burn 25k iterations re-discovering
+        # them. The runner already treats RuntimeError from /init as a clean
+        # episode skip.
+        skip_set = getattr(self, "_scenic_skip_indices", None) or set()
+        # POSTFIX-RERUN PATCH (6): merge the runaway-cost init-state
+        # skip-list so it short-circuits the same way.
+        init_skip_set = getattr(self, "_init_state_skip_indices", None) or set()
+        if int(ep_idx) in skip_set:
+            raise RuntimeError(
+                f"[SCENIC-SKIP-LIST] episode {ep_idx} (task={getattr(self, '_task_name', '?')}) "
+                f"is on the seed-deterministic Scenic skip list; skipping without "
+                f"invoking generate(). See configs/libero_infinity_skip_indices_seed42.yaml."
+            )
+        if int(ep_idx) in init_skip_set:
+            raise RuntimeError(
+                f"[INIT-STATE-SKIP-LIST] episode {ep_idx} (task={getattr(self, '_task_name', '?')}) "
+                f"is on the runaway-cost init-state skip list; skipping without "
+                f"invoking generate(). See LIBERO_TASK8_SKIP_INIT_STATES env var."
+            )
 
         for attempt in range(self._max_reset_attempts):
             seed_bytes = f"{self._run_seed}:{ep_idx}:{attempt}".encode()
