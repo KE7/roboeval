@@ -1471,6 +1471,77 @@ class RoboTwinBackend(SimBackendBase):
             self.env = None
 
 
+# ---------------------------------------------------------------------------
+# Robosuite terminated-episode signature adapter (fix for postfix item 5/5b).
+# ---------------------------------------------------------------------------
+# robosuite 1.4.0's ``MujocoEnv.step`` (environments/base.py:376) enforces a
+# strict contract: when ``self.done`` is ``True`` at the entry of ``step``,
+# it raises ``ValueError("executing action in terminated episode")``.  The
+# canonical way to clear this state is ``env.reset()`` / ``env._reset_internal()``
+# which atomically zeroes ``timestep``, ``cur_time``, ``done`` and re-runs
+# ``sim.forward``.
+#
+# The LIBERO/libero-infinity composition violates that contract during
+# ``LIBEROSimulator.setup()`` + ``LiberoInfinityBackend._post_reset_settle``:
+# both run zero-action robosuite-level steps that increment ``self.timestep``
+# and can flip ``self.done = True`` via ``_post_action``.  Vendor-side patches
+# (5) and (5b) tried to repair this by writing ``env.done = False`` at one
+# (or two) wrapper layers — but smoke (`libero10 task3/task4`) proved that the
+# direct-attribute approach is fragile (different leaf composition each task,
+# shadow attributes on subclasses, stale BDDL ``_post_process`` caches).
+#
+# The proper fix lives here at the *roboeval* boundary: when we own the call
+# site (``LiberoInfinityBackend.reset`` and ``.step``) we can reliably
+# re-establish the robosuite "fresh episode" invariants across every layer of
+# the wrapper chain — without an ``ignore_done=True`` escape hatch and without
+# touching the vendored libero-infinity tree again.
+
+# Attributes that participate in robosuite's terminated-episode signature.
+# ``done`` is the gate read at base.py:376.  ``timestep`` / ``cur_time`` are
+# the counters that ``_post_action`` uses to derive ``done`` on the next
+# call.  ``_terminated`` / ``_truncated`` cover gym>=0.26-style shadow flags
+# that LIBERO subclasses occasionally introduce.  ``_done`` covers the
+# private mirror used by some Scenic-Simulator subclasses.
+_ROBOSUITE_TERMINATED_ATTRS: tuple[tuple[str, object], ...] = (
+    ("done", False),
+    ("_done", False),
+    ("_terminated", False),
+    ("_truncated", False),
+    ("timestep", 0),
+    ("cur_time", 0.0),
+)
+
+
+def _libero_clear_robosuite_terminated_state(env) -> int:
+    """Clear robosuite's terminated-episode signature on every wrapper layer.
+
+    Walks the ``.env`` chain from the outermost wrapper down to the leaf
+    ``MujocoEnv`` subclass and writes the canonical "fresh episode" values
+    for every attribute in :data:`_ROBOSUITE_TERMINATED_ATTRS` that already
+    exists on that layer.  Only writes attributes that are already present —
+    we never *invent* new attributes, so the helper is safe to call on any
+    wrapper chain (LIBERO, LIBERO-Pro, raw robosuite, mock envs in tests).
+
+    Returns the number of layers visited (useful for telemetry / tests).
+    """
+    visited_ids: set[int] = set()
+    layers = 0
+    current = env
+    while current is not None and id(current) not in visited_ids:
+        visited_ids.add(id(current))
+        for attr, default in _ROBOSUITE_TERMINATED_ATTRS:
+            if hasattr(current, attr):
+                try:
+                    setattr(current, attr, default)
+                except (AttributeError, TypeError):
+                    # Some wrappers expose these as read-only properties;
+                    # skip without raising — the next layer may be writable.
+                    pass
+        layers += 1
+        current = getattr(current, "env", None)
+    return layers
+
+
 class LiberoInfinityBackend(LiberoBackend):
     """Backend for LIBERO-Infinity: Scenic-based perturbation testing.
 
@@ -1509,6 +1580,10 @@ class LiberoInfinityBackend(LiberoBackend):
         self._post_reset_rot_tol = 0.03
         self._post_reset_ang_vel_tol = 0.2
         self._post_reset_target_rot_tol = 0.35
+        # Set to True after every reset() so the next step() defensively
+        # clears any stale robosuite terminated-episode state on the leaf
+        # env chain.  See _libero_clear_robosuite_terminated_state.
+        self._needs_terminated_clear = False
 
     _PERTURBATION_AXIS_ORDER = (
         "position",
@@ -1926,6 +2001,17 @@ class LiberoInfinityBackend(LiberoBackend):
                 self._sim.setup()
                 self._post_reset_settle()
 
+                # Robosuite terminated-episode signature fix.
+                # _post_reset_settle restores ``timestep``/``done`` in-place
+                # on a single wrapper layer, but the leaf MujocoEnv subclass
+                # may have shadow state (``_terminated``, ``cur_time``) that
+                # the in-place restore misses, leading to
+                # ``ValueError: executing action in terminated episode`` on
+                # the first /step.  Defensively clear the entire chain.
+                if self._sim is not None and self._sim.libero_env is not None:
+                    _libero_clear_robosuite_terminated_state(self._sim.libero_env)
+                self._needs_terminated_clear = True
+
                 obs = self._sim.last_obs or {}
                 self._last_obs = obs
                 self._last_scene_metadata = {
@@ -1980,6 +2066,16 @@ class LiberoInfinityBackend(LiberoBackend):
         Returns:
             (img, img2, reward, done, info)
         """
+        # Robosuite terminated-episode signature fix: on the very first
+        # policy step of every episode, defensively re-clear the leaf env's
+        # terminated state across the entire wrapper chain.  This is the
+        # roboeval-side mirror of vendor patches (5)/(5b) — keeping the
+        # guard at the call site means we are robust to any future
+        # libero-infinity refactor that changes when ``done`` flips back.
+        if self._needs_terminated_clear:
+            if self._sim is not None and self._sim.libero_env is not None:
+                _libero_clear_robosuite_terminated_state(self._sim.libero_env)
+            self._needs_terminated_clear = False
         obs, reward, done, info = self._sim.step_with_action(np.asarray(action))
         self._last_obs = obs if obs else {}
         img, img2 = self._extract_images(obs)
@@ -2119,9 +2215,19 @@ class LiberoInfinityBackend(LiberoBackend):
             prev_pos = curr_pos
             prev_rot = curr_rot
 
-        env.timestep = saved_timestep
-        env.cur_time = saved_cur_time
-        env.done = saved_done
+        # Robosuite terminated-episode signature fix: instead of writing
+        # ``timestep``/``cur_time``/``done`` to a single wrapper layer,
+        # walk the full ``.env`` chain so shadow attributes on every layer
+        # are cleared in lock-step.  ``saved_*`` values are intentionally
+        # discarded — robosuite's contract is that a "fresh episode" starts
+        # at ``timestep=0, done=False``, and ``_post_reset_settle`` *is* the
+        # tail end of a fresh-episode bring-up.  Honoring that contract here
+        # makes the signature drift impossible.
+        _libero_clear_robosuite_terminated_state(self._sim.libero_env)
+        # Unused but preserved for log-grep continuity with the prior
+        # in-place restore (saved_done was always False post-setup).
+        _saved_state_unused = (saved_timestep, saved_cur_time, saved_done)
+        del _saved_state_unused
         self._sim._done = False
         if obs is None:
             obs = env._get_observations(force_update=True)
