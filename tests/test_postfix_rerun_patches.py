@@ -34,6 +34,14 @@ VENDOR_PATH = os.path.expanduser(
 def _vendor_on_path():
     if VENDOR_PATH not in sys.path:
         sys.path.insert(0, VENDOR_PATH)
+    # Evict any polluted top-level/submodule entries left by earlier tests so
+    # the real vendor package (not a bare module) is what gets imported.
+    for key in [
+        k
+        for k in list(sys.modules)
+        if k == "libero_infinity" or k.startswith("libero_infinity.")
+    ]:
+        sys.modules.pop(key, None)
     yield
     # Drop cached module so subsequent imports re-read env.
     sys.modules.pop("libero_infinity.validation_errors", None)
