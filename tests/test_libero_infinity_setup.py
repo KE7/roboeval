@@ -290,6 +290,7 @@ class TestLiberoInfinityPerturbationConfig(unittest.TestCase):
 
         class FakeSimulation:
             last_obs = {}
+            libero_env = None
 
             def setup(self):
                 seen["setup"] = True
