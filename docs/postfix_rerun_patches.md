@@ -5,6 +5,12 @@ Tracking the four parked vendor/runtime fixes assigned by
 
 Status legend: ✅ landed, 🟡 partial, ⏸ deferred with rationale.
 
+**Roboeval-side PR (gates G5/G6):** https://github.com/KE7/roboeval/pull/1
+(branch `postfix-rerun-patches` against `codex/libero-infinity-perturbation-fixes`).
+Ships patches (3), (3-ext), (4), (6a), (6b), (6b-a), (6b-b) and their tests.
+Vendor-side patches (1), (5), (5b), (B) remain in
+`~/.local/share/roboeval/vendors/libero-infinity/` (out of scope for the roboeval PR).
+
 ## (1) ✅ libero10 OffScreenRenderEnv-None / simulator.py:848
 
 - File: `~/.local/share/roboeval/vendors/libero-infinity/src/libero_infinity/simulator.py`
