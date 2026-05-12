@@ -424,7 +424,29 @@ class SimWrapper(BaseWorldStub):
     def _post(self, path: str, json_data: dict = None) -> dict:
         """Send a POST request to the sim server and return the JSON response."""
         url = f"{self.sim_server_url}{path}"
-        r = requests.post(url, json=json_data or {}, timeout=120)
+        # POSTFIX-RERUN PATCH (3): bump default 120s -> 300s for /init and
+        # /reset paths that legitimately take >2min on task8 + combined
+        # perturbation under heavy Scenic resampling. Override via env.
+        # POSTFIX-RERUN PATCH (6): /init can legitimately take >5min on
+        # exp4 task8 combined-perturbation cells (heavy Scenic compile +
+        # nconmax-spliced MjModel construction). Use a longer default
+        # (900s) for /init only — /step still uses the global timeout
+        # (300s default) so a runaway policy cannot mask itself behind
+        # a long timeout. ROBOEVAL_SIM_INIT_TIMEOUT overrides /init only.
+        import os as _os
+        try:
+            if path == "/init":
+                _to = float(
+                    _os.environ.get(
+                        "ROBOEVAL_SIM_INIT_TIMEOUT",
+                        _os.environ.get("ROBOEVAL_SIM_HTTP_TIMEOUT", "900"),
+                    )
+                )
+            else:
+                _to = float(_os.environ.get("ROBOEVAL_SIM_HTTP_TIMEOUT", "300"))
+        except ValueError:
+            _to = 900.0 if path == "/init" else 300.0
+        r = requests.post(url, json=json_data or {}, timeout=_to)
         if not r.ok:
             try:
                 err = r.json()
@@ -436,7 +458,13 @@ class SimWrapper(BaseWorldStub):
     def _get(self, path: str) -> dict:
         """Send a GET request to the sim server and return the JSON response."""
         url = f"{self.sim_server_url}{path}"
-        r = requests.get(url, timeout=120)
+        # POSTFIX-RERUN PATCH (3): see _post above.
+        import os as _os
+        try:
+            _to = float(_os.environ.get("ROBOEVAL_SIM_HTTP_TIMEOUT", "300"))
+        except ValueError:
+            _to = 300.0
+        r = requests.get(url, timeout=_to)
         if not r.ok:
             try:
                 err = r.json()

@@ -1,0 +1,89 @@
+# POSTFIX-RERUN PATCH (4) + (6b): seed-deterministic Scenic
+# generation-rejection skip-list, scoped per (suite, task) so a list
+# authored for one experiment cannot leak into another.
+#
+# Source: results/neurips2026/postfix_rerun/exp3_parallel/_logs/{combined_task0,combined_task1}/run.log
+# These episode indices reproducibly fail Scenic's `generate scenario in
+# 25000 iterations` rejection sampling under run_seed=42 for the
+# libero_infinity_goal suite combined-perturbation tasks. Skipping them
+# up-front avoids burning ~25 GPU-seconds per failure.
+#
+# Schema (POSTFIX-RERUN PATCH (6b)):
+#   seed: <int>                      # informational
+#   per_suite_task:
+#     "<suite>":
+#       "<task>": [int, ...]
+#   legacy_per_task_suite: <suite>   # gate for the legacy `indices:`
+#                                    # and `per_task:` lists below; only
+#                                    # honored when the caller's suite
+#                                    # matches. This prevents the
+#                                    # cross-experiment leakage that
+#                                    # showed up on exp4 task8 (suite
+#                                    # libero_infinity_spatial) when this
+#                                    # file was authored for exp3
+#                                    # combined_task0/1 (suite
+#                                    # libero_infinity_goal).
+
+seed: 42
+
+# Suite-scoped lists. The 23-index byte-identical Subtype-A intersection
+# applies to BOTH combined_task0 AND combined_task1 in the
+# libero_infinity_goal suite. Task-0 has one extra deterministic failure
+# at index 43.
+per_suite_task:
+  libero_infinity_goal:
+    "0":
+      - 10
+      - 19
+      - 29
+      - 31
+      - 43   # task-0-only deterministic failure observed in exp3_parallel
+      - 53
+      - 63
+      - 64
+      - 67
+      - 69
+      - 73
+      - 80
+      - 85
+      - 86
+      - 93
+      - 101
+      - 103
+      - 105
+      - 114
+      - 116
+      - 117
+      - 119
+      - 120
+      - 142
+    "1":
+      - 10
+      - 19
+      - 29
+      - 31
+      - 53
+      - 63
+      - 64
+      - 67
+      - 69
+      - 73
+      - 80
+      - 85
+      - 86
+      - 93
+      - 101
+      - 103
+      - 105
+      - 114
+      - 116
+      - 117
+      - 119
+      - 120
+      - 142
+
+# ── Legacy schema retained read-only for backward compatibility. ──
+# Only honored when ``legacy_per_task_suite`` matches the caller's suite.
+legacy_per_task_suite: libero_infinity_goal
+indices: []
+per_task: {}
