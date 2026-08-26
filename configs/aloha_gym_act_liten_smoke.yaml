@@ -1,0 +1,49 @@
+# roboeval smoke config: ACT x gym-aloha (AlohaTransferCube-v0)
+#
+# Usage:
+#   roboeval serve --vla act --sim aloha_gym --headless &
+#   roboeval run -c configs/aloha_gym_act_liten_smoke.yaml
+
+# Action space:
+#   ACT outputs 14-dim absolute joint positions (7 joints × 2 arms).
+#   The gym-aloha backend accepts joint_pos_abs actions natively.
+#   delta_actions MUST be false — ACT is not a delta-EEF model.
+#
+# Checkpoint:
+#   lerobot/act_aloha_sim_transfer_cube_human (~300 MB, auto-downloaded)
+#   Trained on human demonstrations of AlohaTransferCube-v0.
+#   Published success rate on this task: ~80–90% (lerobot benchmark).
+
+name: aloha_gym_act_smoke_liten
+
+# VLA server
+vla: act
+vla_url: http://localhost:5107
+
+# Sim
+sim: aloha_gym
+sim_url: http://localhost:5001
+suite: AlohaTransferCube-v0
+
+# Episodes — 10 episodes, 1 task for a smoke check
+episodes_per_task: 10
+max_tasks: 1
+
+# VLM — disabled; ACT has no language conditioning
+
+# Action — ACT uses absolute joint positions, NOT delta actions
+delta_actions: false
+
+# Python for subprocess (defaults to sys.executable if empty)
+# LITEN hierarchical mode using a local VLM endpoint
+no_vlm: false
+vlm_model: Qwen/Qwen3.6-27B-FP8
+vlm_endpoint: localhost:8000
+
+eval_python: ""
+
+# Output
+output_dir: results/act_smoke
+
+# Extra params passed to roboeval.run_sim_eval (key -> value)
+params: {}

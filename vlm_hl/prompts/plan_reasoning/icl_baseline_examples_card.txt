@@ -1,0 +1,8 @@
+
+### Context from Previous Attempts
+
+To help the selection and phrasing of instructions for the VLA in your program's calls to world.act(...), we provide cases where the VLA successfully accomplished a provided instruction, along with the initial image of the scene prior to the VLA's execution.
+
+Each provided successful instruction execution contains the following:
+1. The initial image of the environment prior to the execution of the instruction, indicated by `[INSTRUCTION_<i>_INITIAL_IMAGE]`.
+2. `[INSTRUCTION_<i>]`: The instruction that was provided to the VLA.

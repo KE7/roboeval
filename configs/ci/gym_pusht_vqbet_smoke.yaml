@@ -1,0 +1,23 @@
+# CI smoke config: VQ-BeT × gym_pusht
+# Lightweight smoke for CI: a few episodes on the canonical PushT task.
+
+name: ci_gym_pusht_vqbet_smoke
+
+vla: vqbet
+vla_url: http://localhost:5108
+
+sim: gym_pusht
+sim_url: http://localhost:5305
+suite: ""
+task: gym_pusht/PushT-v0
+
+episodes_per_task: 5
+max_tasks: 1
+
+delta_actions: false
+no_vlm: true
+
+eval_python: ""
+
+output_dir: results/ci_gym_pusht_vqbet_smoke
+params: {}

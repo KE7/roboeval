@@ -1,0 +1,39 @@
+# roboeval smoke config: Pi 0.5 × LIBERO-Pro (10 episodes, 1 task, direct / no VLM)
+#
+# Usage:
+#   roboeval serve --vla pi05 --sim libero_pro --headless &
+#   roboeval run -c configs/libero_pro_pi05_smoke.yaml
+
+# Smoke validation: 10 episodes on 1 task; gate is ≥1/10 successes.
+# For the hierarchical VLM planner variant see:
+#   configs/libero_pro_pi05_liten_smoke.yaml
+
+name: libero_pro_pi05_smoke
+
+# VLA server
+vla: pi05
+vla_url: http://localhost:5100
+
+# Sim
+sim: libero_pro
+sim_url: http://localhost:5300
+suite: libero_spatial
+
+# Episodes
+episodes_per_task: 10
+max_tasks: 1
+
+# VLM — disabled (direct evaluation mode, no hierarchical planner)
+no_vlm: true
+
+# Action
+delta_actions: true
+
+# Python for subprocess (defaults to sys.executable if empty)
+eval_python: ""
+
+# Output
+output_dir: results/libero_pro_pi05_smoke
+
+# Extra params passed to roboeval.run_sim_eval (key -> value)
+params: {}

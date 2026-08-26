@@ -1,0 +1,90 @@
+# Seed-deterministic Scenic generation-rejection skip-list, scoped per
+# (suite, task) so a list authored for one suite cannot leak into another.
+#
+# The episode indices below reproducibly fail Scenic's `generate scenario
+# in 25000 iterations` rejection sampling at run_seed=42 for the
+# libero_infinity_goal suite's combined-perturbation tasks: the sampler
+# cannot place a valid initial state, so the episode can never start.
+# Listing them here short-circuits the failure up-front instead of
+# re-discovering it through a full 25k-iteration rejection loop each run.
+# Regenerate the list by recording the indices that raise the Scenic
+# rejection error in a full pass at the same seed.
+#
+# Activated by:
+#   export LIBERO_SCENIC_SKIP_INDICES=configs/libero_infinity_skip_indices_seed42.yaml
+#
+# Schema:
+#   seed: <int>                      # informational
+#   per_suite_task:
+#     "<suite>":
+#       "<task>": [int, ...]
+#   legacy_per_task_suite: <suite>   # gate for the legacy `indices:`
+#                                    # and `per_task:` lists below; only
+#                                    # honored when the caller's suite
+#                                    # matches. This prevents cross-suite
+#                                    # leakage, e.g. a goal-suite list
+#                                    # bleeding into task 8 of the
+#                                    # libero_infinity_spatial suite.
+
+seed: 42
+
+# Suite-scoped lists. The same 23 indices fail for BOTH task 0 and task 1
+# of the libero_infinity_goal suite. Task 0 has one extra deterministic
+# failure at index 43.
+per_suite_task:
+  libero_infinity_goal:
+    "0":
+      - 10
+      - 19
+      - 29
+      - 31
+      - 43   # task-0-only deterministic failure
+      - 53
+      - 63
+      - 64
+      - 67
+      - 69
+      - 73
+      - 80
+      - 85
+      - 86
+      - 93
+      - 101
+      - 103
+      - 105
+      - 114
+      - 116
+      - 117
+      - 119
+      - 120
+      - 142
+    "1":
+      - 10
+      - 19
+      - 29
+      - 31
+      - 53
+      - 63
+      - 64
+      - 67
+      - 69
+      - 73
+      - 80
+      - 85
+      - 86
+      - 93
+      - 101
+      - 103
+      - 105
+      - 114
+      - 116
+      - 117
+      - 119
+      - 120
+      - 142
+
+# ── Legacy schema retained read-only for backward compatibility. ──
+# Only honored when ``legacy_per_task_suite`` matches the caller's suite.
+legacy_per_task_suite: libero_infinity_goal
+indices: []
+per_task: {}

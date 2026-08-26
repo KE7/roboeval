@@ -1,0 +1,31 @@
+# roboeval smoke config: Pi 0.5 x LIBERO-Infinity position perturbations
+#
+# Usage:
+#   roboeval serve --vla pi05 --sim libero_infinity --headless &
+#   roboeval run -c configs/libero_infinity_pi05_position_perturb_smoke.yaml
+
+name: libero_infinity_pi05_position_perturb_smoke
+
+vla: pi05
+vla_url: http://localhost:5100
+
+sim: libero_infinity
+sim_url: http://localhost:5308
+# Spatial-only single-suite smoke; this does not run all LIBERO-Infinity suites.
+suite: libero_infinity_spatial
+task: ""
+
+episodes_per_task: 10
+max_tasks: 1
+
+delta_actions: true
+no_vlm: true
+
+eval_python: ""
+output_dir: results/libero_infinity_pi05_position_perturb_smoke
+
+params: {}
+
+sim_config:
+  perturbation: position
+  seed: 42

@@ -1,0 +1,34 @@
+# roboeval smoke config: pi05 x libero_spatial (10 episodes per task, 1 task)
+# Usage: roboeval run --config configs/libero_spatial_pi05_smoke.yaml
+# Requires:
+#   Server: roboeval serve --vla pi05 --sim libero --headless
+
+name: libero_spatial_pi05_smoke
+
+# VLA server
+vla: pi05
+vla_url: http://localhost:5100
+
+# Sim
+sim: libero
+sim_url: http://localhost:5300
+suite: libero_spatial
+
+# Episodes
+episodes_per_task: 10
+max_tasks: 1
+
+# VLM
+no_vlm: true
+
+# Action
+delta_actions: true
+
+# Python for subprocess (defaults to sys.executable if empty)
+eval_python: ""
+
+# Output
+output_dir: results/migration_20260424_232852/phase4
+
+# Extra params passed to roboeval.run_sim_eval (key -> value)
+params: {}

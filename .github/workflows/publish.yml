@@ -1,0 +1,142 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Least privilege. Trusted publishing needs id-token: write at the job level;
+# nothing here needs to write to the repository.
+permissions:
+  contents: read
+
+# A release must never race another release. Do not cancel a run in progress:
+# an upload that is interrupted mid-flight can leave a partially published
+# release behind.
+concurrency:
+  group: publish-pypi
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # Required for trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # A tag of v0.1.1 on a tree whose pyproject.toml still says 0.1.0 would
+      # rebuild 0.1.0 and PyPI would reject it with "400 File already exists"
+      # — after the tag is already public. Fail here instead, before any build.
+      - name: Assert tag matches project version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          echo "tag=${TAG} pyproject version=${VERSION}"
+          if [ "${TAG}" != "v${VERSION}" ]; then
+            echo "::error::Tag ${TAG} does not match pyproject version ${VERSION} (expected tag v${VERSION})."
+            exit 1
+          fi
+
+      - name: Install build
+        run: python -m pip install --upgrade build
+
+      - name: Build sdist + wheel
+        run: |
+          set -euo pipefail
+          # Never build on top of a stale dist/, and never let a leftover
+          # egg-info SOURCES.txt re-inject files that packaging no longer lists.
+          rm -rf dist build ./*.egg-info
+          python -m build --sdist --wheel --outdir dist/
+
+      - name: Verify build artifacts
+        run: |
+          set -euo pipefail
+          ls -la dist/
+          python -m pip install --upgrade twine
+          python -m twine check dist/*
+
+      # twine check only validates metadata — it would happily pass an
+      # artifact containing an unpublished config. Assert on contents.
+      #
+      # Paths are normalised to be artifact-relative first (the sdist nests
+      # everything under "<name>-<version>/"), so rules can be anchored to the
+      # top level. Do NOT match on unanchored substrings like "/results/":
+      # that also matches the legitimate roboeval/results/ module and would
+      # block every release.
+      - name: Assert no internal files in artifacts
+        run: |
+          python - <<'PY'
+          import glob
+          import re
+          import sys
+          import tarfile
+          import zipfile
+
+          SDIST_PREFIX = re.compile(r"^[A-Za-z0-9_.\-]+-\d[^/]*/")
+
+          # Directories that must never appear at the top level of an artifact.
+          FORBIDDEN_TOPLEVEL = {
+              "configs", "docs", "scripts", "tests", "results", "logs",
+              "scratch", "demo_videos", "examples", "notes", ".github",
+              ".venvs", ".claude",
+          }
+          # Filename patterns forbidden anywhere in an artifact.
+          FORBIDDEN_ANY = [
+              (re.compile(r"neurips", re.I), "unpublished venue material"),
+              (re.compile(r"\.ya?ml$", re.I), "config/data file"),
+              (re.compile(r"\.env$|\.env\.", re.I), "environment file"),
+              (re.compile(r"\.(pem|key|p12|pfx|ppk)$", re.I), "key material"),
+              (re.compile(r"(^|/)(id_rsa|id_ed25519|\.netrc|secrets\.)", re.I), "credential"),
+          ]
+          # Markdown is only allowed as the packaged README / metadata.
+          ALLOWED_MD = re.compile(r"(^|/)README\.md$")
+
+          def offences(path: str):
+              rel = SDIST_PREFIX.sub("", path)
+              if not rel or rel.endswith("/"):
+                  return
+              top = rel.split("/", 1)[0]
+              if top in FORBIDDEN_TOPLEVEL:
+                  yield f"top-level {top}/"
+              if rel.endswith(".md") and not ALLOWED_MD.search(rel):
+                  yield "markdown doc"
+              for rx, why in FORBIDDEN_ANY:
+                  if rx.search(rel):
+                      yield why
+
+          names = []
+          for f in sorted(glob.glob("dist/*.tar.gz")):
+              with tarfile.open(f) as tf:
+                  names += [(f, n) for n in tf.getnames()]
+          for f in sorted(glob.glob("dist/*.whl")):
+              with zipfile.ZipFile(f) as zf:
+                  names += [(f, n) for n in zf.namelist()]
+
+          if not names:
+              sys.exit("no artifacts found in dist/")
+
+          bad = [
+              f"  {artifact}: {name}  [{'; '.join(reasons)}]"
+              for artifact, name in names
+              for reasons in [list(offences(name))]
+              if reasons
+          ]
+          if bad:
+              sys.exit("FORBIDDEN IN ARTIFACT:\n" + "\n".join(bad))
+          print(f"clean: {len(names)} entries across {len(set(a for a, _ in names))} artifacts")
+          PY
+
+      - name: Publish to PyPI
+        # Pinned to a full commit SHA: this action runs with id-token: write in
+        # scope, so a moving branch ref would let an upstream change mint PyPI
+        # credentials for this project. dc37677 is tag v1.14.2.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
+        with:
+          packages-dir: dist/
+          # No password/token needed: trusted publishing via OIDC.

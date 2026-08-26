@@ -1,0 +1,191 @@
+# ============================================
+# roboeval .gitignore
+# ============================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+MANIFEST
+
+# --- Virtual environments ---
+.venvs/
+.venv/
+venv/
+env/
+
+# --- Testing ---
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# --- IDE / Editor ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.ruff_cache/
+.mypy_cache/
+
+# --- Shell scripts in repo root ---
+/*.sh
+
+# --- Archived scripts ---
+scripts/legacy/
+scripts/README.md
+
+# --- Unpublished research and internal working documents ---
+# Deliberately category-based, not a list of file names: an enumeration of
+# specific private titles is itself a disclosure of what exists. Keep new
+# rules here broad, and prefer the private directories below over adding a
+# pattern for one document.
+#
+# One pattern per line. .gitignore supports neither brace expansion
+# ({a,b}) nor several space-separated patterns on a line.
+
+# Private working areas — put anything unpublished here.
+docs/internal/
+docs/private/
+docs/drafts/
+configs/private/
+configs/experiments/
+scripts/private/
+notes/
+
+# Suffix convention for a private file that must live beside public ones.
+*.private
+*.private.*
+*_internal.md
+*.draft.md
+
+# Unpublished venue / submission material, at any depth.
+*NeurIPS*
+*neurips*
+*NEURIPS*
+
+# Internal report and analysis categories.
+docs/*analysis*
+docs/*audit*
+docs/*findings*
+docs/*notes*
+docs/*paper*
+docs/*plan*
+docs/*proposal*
+docs/*report*
+docs/*research*
+docs/*results*
+docs/*_rca*
+docs/*blog*
+docs/*_design*
+docs/review_*
+docs/postfix_*
+docs/gb10_*
+
+# Unpublished experiment configurations and their reporting scripts.
+configs/groot_*
+configs/libero_infinity_groot_*
+configs/neurips*
+scripts/neurips*
+
+# --- Secrets and credentials (never commit) ---
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.ppk
+secrets.*
+.netrc
+.npmrc
+credentials.json
+service-account*.json
+*token.txt
+*apikey*.txt
+*openaikey*.txt
+
+# --- Results / experiment data ---
+/results/
+outputs/
+libero_spatial*/
+sim_experience/
+demo_videos/
+liten_context/
+liten_examples/
+planner_context/
+
+# --- Log files ---
+logs/
+scratch/
+*.log
+MUJOCO_LOG.TXT
+
+# --- Local config files ---
+litellm_*.yaml
+
+# --- Notification scripts ---
+notify_*.sh
+
+# --- Temp artifacts ---
+echo
+EXIT:*
+Exit:*
+
+# --- Architecture notes ---
+sims/vla_policies/ARCHITECTURE.md
+
+# --- Lock files ---
+# uv.lock is a local resolver lockfile for uv; users may install via pip,
+# so we don't commit it.
+uv.lock
+
+# --- Binary artifacts ---
+*.whl
+
+# --- Reports / development artifacts ---
+GRIPPER_*.md
+GRIPPER_*.txt
+GROOT_*.md
+INTERNVLA_*.md
+TASK_COMPLETION_REPORT.txt
+bench_output.log
+monitor_actions.py
+wait_test.sh
+MUJOCO_LOG.TXT
+
+# --- Vendored external repos ---
+InternVLA-A1/
+
+# --- Design notes ---
+docs/docker_migration_plan.md
+docs/action_space_plan.md
+docs/liten_adapter_design.md
+docs/lerobot_known_issues.md
+
+# --- Other ---
+.claude/
+images/
+requirements/
+utils/
+backup_data/
+bridge_data/
+generated_programs/
+manual_evaldata/
+finetune_data/
+*.egg-info/
+
+# --- Local planning artifacts ---
+.dev-tooling/

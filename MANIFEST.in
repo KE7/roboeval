@@ -1,0 +1,31 @@
+# sdist allow-list.
+#
+# global-exclude runs first and drops everything; only what is explicitly
+# re-added below can ship. This is deliberately deny-by-default: the previous
+# packaging configuration was deny-list shaped, so every new file under
+# configs/ or docs/ was published to PyPI unless someone remembered to exclude
+# it. Shipping a new file now requires an explicit line here, which shows up in
+# review as a diff.
+#
+# Note that the wheel is NOT fed by this file: [tool.setuptools]
+# include-package-data is false, and wheel contents come from
+# [tool.setuptools.package-data] in pyproject.toml.
+
+global-exclude *
+
+include pyproject.toml
+include README.md
+include LICENSE
+
+recursive-include roboeval *.py
+include roboeval/py.typed
+recursive-include roboeval/_scripts *.sh
+recursive-include sims *.py
+include sims/robocasa_controller_configs.pkl
+
+# Byte-code and caches can never ship, even if a rule above would match them.
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.pyd
+global-exclude __pycache__/*
+global-exclude .DS_Store

@@ -1,0 +1,31 @@
+# CI smoke config: smolvla x libero_object
+#
+# Gate: >=1/10 episodes succeed (smoke, not benchmark).
+# Mode: no-vlm (direct instruction, delta-actions).
+# Expected runtime: ~10 min on GB10 (10 eps x ~60 s/ep).
+#
+# Usage:
+#   roboeval serve --vla smolvla --sim libero --headless &
+#   roboeval run -c configs/ci/smolvla_libero_object_smoke.yaml
+
+name: ci_smolvla_libero_object_smoke
+
+vla: smolvla
+vla_url: http://localhost:5101
+
+sim: libero
+sim_url: http://localhost:5300
+suite: libero_object
+
+# Smoke gate: 10 episodes on 1 task.
+episodes_per_task: 10
+max_tasks: 1
+
+no_vlm: true
+delta_actions: true
+
+eval_python: ""
+
+output_dir: results/ci
+
+params: {}

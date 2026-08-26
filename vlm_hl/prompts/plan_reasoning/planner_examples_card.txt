@@ -1,0 +1,33 @@
+
+### Context from Previous Attempts
+
+To help the selection and phrasing of instructions for the VLA in your program's calls to world.act(...), we provide information about the execution of programs that you generated in previous attempts for overall tasks. These previous executions contain a sequence of previously attempted instructions by the VLA, whether or not those instruction attempts were successful, and context regarding why the VLA may have acted differently than expected in cases where the instruction attempt was unsuccesful.
+
+Each previously executed program, (`[EXECUTION_<i>]`), contains the following information:
+1. The initial image of the environment prior to the execution of the program you generated, indicated by `[EXECUTION_<i>_INITIAL_IMAGE]`.
+2. `[OVERALL TASK <i>]`: The overall that was provided to you by the user. You generated a program in an attempt to accomplish this overall task.
+3. The final image of the environment after to the execution of the program you generated, indicated by `[EXECUTION_<i>_FINAL_IMAGE]`.
+4. [SUCCESS <i>]: Whether the program executed on the robot succeeded in accomplishing the overall task.
+5. [ASSESSMENT <i>]: This will describe how the environment changed, overall, as a consequence of the robot's action. In the case of success, it will describe the changes to the environment that amounted to success, and in the case of failure, it will describe what happened instead in the scene.
+6. A sequence of the instructions that your executed program provided to the VLA, and the result of the VLA attempting to achieve each of these instructions. Each attempt is structured as follows:
+    Each previous attempt is labeled by (`[VLA_ATTEMPT_<i>.<j>]`), where i is the index of the overall execution, and j is the specific attempted instruction within that overall execution.
+    6.1. The initial image of the environment prior to the robot's execution via a call to world.act(...), indicated by `[VLA_ATTEMPT_<i>.<j>_INITIAL_IMAGE]`.
+    6.2. `[VLA_INSTRUCTION <i>.<j>]`: The instruction that was provided to the VLA via world.act(...).
+    6.3. `[VLA_ATTEMPT_<i>.<j>_SUCCESS]`: whether the attempt at executing the instruction succeeded.
+    6.4. `[VLA_ATTEMPT_<i>.<j>_WHAT_HAPPENED]`: In the case of failures, this will describe what happened instead in the scene.
+    6.5. `[VLA_ATTEMPT_<i>.<j>_REASONING]`: In the case of failures, this will provide potential causes for the VLA's failure and insights regarding what about an environment would cause this particular instruction to fail. In the case of successes, this will describe relevant details about the environment that can be interpreted as factors that enabled the VLA's success.
+
+Important instructions for previous attempts:
+1. Do not assume that prior attempts were performed for the current top-level task, unless the language in `[OVERALL TASK <i>]` is exactly the same. In the case that the top-level task instruction is the exact same, do not assume that the initial environment scene (image) is the same.
+2. Any `[VLA_ATTEMPT_<i>.<j>]`, `[VLA_ATTEMPT_<i>.<j>_INITIAL_IMAGE]`, `[VLA_INSTRUCTION <i>.<j>]`, `[VLA_ATTEMPT_<i>.<j>_SUCCESS]`, `[VLA_ATTEMPT_<i>.<j>_WHAT_HAPPENED]`, and `[VLA_ATTEMPT_<i>.<j>_REASONING]` information is scoped to the attempt it belongs to, and to the program execution (`[EXECUTION_<i>]`) it belongs to.
+3. Do not assume that your current overall instruction and initial environment image are the same as the images in the previous attempts. Even subtle things, like the positions and orientations of objects, can affect the model's ability to execute instructions.
+4. VLA-controlled robots are stochastic. If a specific instruction was successfully accomplished by the VLA in an environment, it is not a guarantee that similar instructions will succeed in similar environments (and the same with failures). Rather, you should use previous successes and failures to form a sense of success 'likelihood' for a given instruction in a given environment.
+
+When generating a program, your invocations of the VLA via calls to world.act(...) should be informed by the previous attempts included here. If a task you intend on instructing to the VLA is similar to instructions in previous attempts, use the information about those previous attempts to choose what to instruct the VLA and how to instruct it. For example, if the same or similar instructions were previously instructed in similar environments, what is the rate of success? If similar instructions have a poor success rate, refer to the reasoning to understand why they may not have been successful. Do similar factors exist in the current environment that would lead an instruction to be failed by the VLA? Ultimately, when considering an world.act(...) call to include in your program, you should create a numerical estimate of its likelihood of success based on past experience. If a similar task does not exist in prior experience, you can assign N/A to its likelihood of success.
+
+If it's unlikely that a call to world.act(...) involving a specific object(s) in the scene will succeed (less than 75% success rate from prior attempts), you should consider alternate objects/actions in the scene can be used to still accomplish the top-level overall task, and use those in your program's calls to world.act(...). For example, if previous attempts at manipulating object x have a success rate of 50%, but there are no prior attempts at manipulating object y, you should opt to manipulate object y if it is a viable part of the overall task's solution. You should prefer *objects that you don't have prior experience for* over of objects in prior attempts that are likely to lead to failure (less than 75% success rate). If certain objects are indeed necessary for accomplishing the overall task but are nontrivially likely to fail, try to phrase the instruction to maximize its chance of success by the VLA. And remember that the likelihood of success for an instruction is also dependent on the configuration of the environment: an instruction that fails in one environment configuration may succeed in a sufficiently different one, and vice versa.
+
+To summarize, when creating instructions in your calls to world.act(...), you should use the following priority order. All instructions should be relevant to accomplishing the overall task:
+1. Instructions that are very likely to succeed (>75%) based on prior experience.
+2. Instructions that have not been tried yet.
+3. Instructions that are not very likely to succeed (<75%) based on prior experience, phrased in such a way that will maximize their success likelihood.

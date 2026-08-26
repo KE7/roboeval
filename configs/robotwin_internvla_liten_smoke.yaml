@@ -1,0 +1,44 @@
+# roboeval smoke config: InternVLA x RoboTwin with VLM planning
+#
+# Usage:
+#   roboeval serve --vla internvla --sim robotwin --headless &
+#   roboeval run -c configs/robotwin_internvla_liten_smoke.yaml
+
+# RoboTwin uses 14-dim absolute joint_pos actions for InternVLA.
+
+name: robotwin_internvla_smoke_liten
+
+# VLA server
+vla: internvla
+vla_url: http://localhost:5105
+
+# Sim
+sim: robotwin
+sim_url: http://localhost:5302
+suite: robotwin
+# RoboTwin resolves integer indices against alphabetical envs/<task>.py listing.
+# Task "0" resolves to the first env alphabetically (block_hammer_beat).
+task: "0"
+
+# Episodes
+episodes_per_task: 10
+max_tasks: 1
+
+# RoboTwin consumes ABSOLUTE 14-dim joint targets, NOT delta EEF.
+delta_actions: false
+
+# VLM
+
+# Python for subprocess (defaults to sys.executable if empty)
+# VLM planner endpoint
+no_vlm: false
+vlm_model: Qwen/Qwen3.6-27B-FP8
+vlm_endpoint: localhost:8000
+
+eval_python: ""
+
+# Output
+output_dir: results/robotwin_internvla_smoke
+
+# Extra params passed to roboeval.run_sim_eval (key -> value)
+params: {}

@@ -1,0 +1,28 @@
+# Runaway-cost init-state skip-list.
+#
+# Activated by:
+#   export LIBERO_TASK8_SKIP_INIT_STATES=configs/libero_infinity_task8_skip_init_states.yaml
+#
+# Schema (suite-scoped):
+#   seed: <int>                       # informational
+#   per_suite_task:
+#     "<suite>":
+#       "<task>": [int, int, ...]     # init-state indices to skip
+#
+# Distinct from the seed-deterministic Scenic skip-list in
+# configs/libero_infinity_skip_indices_seed42.yaml: those episodes can
+# never start, whereas these merely cost too much to start. It covers
+# episodes whose Scenic compile plus nconmax-spliced MjModel construction
+# legitimately exceeds the /init timeout — minutes per episode on
+# heavily-perturbed tasks with many objects. The runner treats a
+# RuntimeError prefixed with [INIT-STATE-SKIP-LIST] from /init as a
+# clean episode skip — no sample drawn, no time burned.
+#
+# Operator note: populate ``per_suite_task[<suite>][<task>]`` after
+# observing failing init-state indices in the smoke logs. The shipped
+# file starts empty so enabling the env var does not silently change
+# behaviour.
+seed: 42
+per_suite_task:
+  libero_infinity_spatial:
+    "8": []
