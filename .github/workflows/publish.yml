@@ -132,6 +132,27 @@ jobs:
           print(f"clean: {len(names)} entries across {len(set(a for a, _ in names))} artifacts")
           PY
 
+      # PyPI rejects any distribution whose metadata contains a PEP 440 direct
+      # reference (e.g. "pkg @ git+https://..."). That failure only surfaces at
+      # upload, after the tag is already public. Catch it before we get there.
+      - name: Assert no direct URL dependencies
+        run: |
+          python - <<'PY'
+          import sys, tomllib
+          p = tomllib.load(open("pyproject.toml", "rb"))["project"]
+          bad = []
+          for spec in p.get("dependencies", []):
+              if "@" in spec or "git+" in spec:
+                  bad.append(f"dependencies: {spec}")
+          for extra, specs in p.get("optional-dependencies", {}).items():
+              for spec in specs:
+                  if "@" in spec or "git+" in spec:
+                      bad.append(f"optional-dependencies[{extra}]: {spec}")
+          if bad:
+              sys.exit("DIRECT REFERENCE(S) — PyPI will reject this upload:\n  " + "\n  ".join(bad))
+          print("no direct references")
+          PY
+
       - name: Publish to PyPI
         # Pinned to a full commit SHA: this action runs with id-token: write in
         # scope, so a moving branch ref would let an upstream change mint PyPI
