@@ -14,6 +14,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Allow running CI by hand from the Actions tab. A force-push that rewrites
+  # history does not always emit a push event, so a manual trigger is useful.
+  workflow_dispatch:
 
 # Cancel in-progress runs for the same ref (saves compute on rapid pushes)
 concurrency:
