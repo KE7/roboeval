@@ -108,3 +108,12 @@ available on PyPI under open-source licenses.
 
 *If you believe an attribution is missing or incorrect, please open an issue at
 https://github.com/KE7/roboeval/issues.*
+
+---
+
+## Derived Source Code
+
+### LITEN companion code
+- **Upstream:** https://github.com/ameesh-shah/liten-vla (no license declared)
+- **Citation:** Shah, Chen, Godbole, Mora, Seshia, and Levine. "Learning Affordances at Inference-Time for Vision-Language-Action Models." arXiv:2510.19752, 2025.
+- **Use in roboeval:** the hierarchical (LITEN) evaluation mode is adapted from this code. The derived files are `ica/reasoning_ica.py`, `vlm_hl/vlm_methods.py`, `vlm_hl/vlm_utils.py`, `vlm_hl/prompts/`, `roboeval/run.py`, `roboeval/run_utils.py`, and `roboeval/world_stubs.py`.
